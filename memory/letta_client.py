@@ -1,7 +1,7 @@
 # memory/letta_client.py
 # Letta memory framework — one agent per student, shared across all teaching agents
 
-from letta import create_client
+from letta import Letta
 from letta.schemas.memory import ChatMemory
 from letta.schemas.llm_config import LLMConfig
 from config import LETTA_BASE_URL, OLLAMA_BASE_URL, LLM_MODEL
