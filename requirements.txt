@@ -6,8 +6,10 @@ groq>=0.4.0
 letta>=0.3.0
 
 # Embedding + Vector DB
-FlagEmbedding>=1.2.0
-sentence-transformers>=2.2.0
+FlagEmbedding==1.2.11
+sentence-transformers==2.7.0
+transformers==4.40.0
+torch==2.2.0
 chromadb>=0.4.0
 
 # Knowledge Graph
