@@ -1,237 +1,226 @@
 # memory/letta_client.py
-# Letta memory framework — one agent per student, shared across all teaching agents
+# Letta Cloud memory — no local server needed
+# Uses Letta Cloud API at app.letta.com
 
-from letta import Letta
-from letta.schemas.memory import ChatMemory
-from letta.schemas.llm_config import LLMConfig
-from config import LETTA_BASE_URL, OLLAMA_BASE_URL, LLM_MODEL
 import json
+import os
+from letta_client import Letta
 
+# Read from environment / Streamlit secrets
+LETTA_API_KEY  = os.getenv("LETTA_API_KEY", "")
+LETTA_BASE_URL = os.getenv("LETTA_BASE_URL", "https://inference.letta.com")
 
 MEMORY_PERSONA = """
-You are the memory system for one student learning AI engineering.
+You are the memory system for an AI engineering tutor.
+You track everything about one student's learning journey.
 
-You track everything about their learning journey across all teaching agents.
+Things worth storing in core memory (always visible):
+- student skill level (beginner/intermediate/advanced)
+- current topic being studied
+- learning style (code_first/theory_first/visual)
+- recurring weak areas (if seen 2+ times)
+- goal (ai_engineer/data_scientist)
 
-Things worth updating in CORE memory (always in context):
-- Student skill level changes (beginner → intermediate → advanced)
-- Recurring struggles seen 2+ times — these are priority weak areas
-- Learning style preferences (code_first / theory_first / visual)
-- Current topic and learning goal
-
-Things worth storing in ARCHIVAL memory (long term history):
-- Every assessment result with score and concept
-- Every misconception identified by Feedback Agent
-- Every explanation approach tried by Solver Agent
-- Patterns you notice across multiple sessions
+Things worth storing in archival memory (searched when needed):
+- every assessment result with score
+- every misconception identified
+- every explanation approach tried
+- every concept mastered
 
 Things NOT worth storing:
-- Casual greetings or one-word replies
-- Repeated identical questions
-- Simple yes/no exchanges
+- casual greetings
+- simple yes/no exchanges
+- duplicate records of same event
 
-When Solver, Assessment, or Feedback agents send you an event,
-read it carefully and decide autonomously what to remember and how.
-Consolidate patterns — do not just append forever.
+When you receive information from a teaching agent,
+decide autonomously what to remember and how to update existing memories.
 """
 
 
 class LettaClient:
     """
-    Letta memory client.
-
-    One Letta agent per student.
-    All three teaching agents (Solver, Assessment, Feedback)
-    share the same Letta agent for their student.
-
-    The LLM inside Letta decides what to remember —
-    we guide it via the persona, not hardcoded rules.
-
-    Core Memory  = always in context window (like RAM)
-    Archival Memory = outside context, searched on demand (like disk)
+    Letta Cloud memory client.
+    ONE Letta agent per student — shared by all three teaching agents.
+    Connects to Letta Cloud — no local server needed.
     """
 
     def __init__(self):
-        self.client = create_client(base_url=LETTA_BASE_URL)
-        self._agent_ids = {}  # cache: student_id → letta agent_id
+        if not LETTA_API_KEY:
+            raise ValueError(
+                "LETTA_API_KEY not set. "
+                "Add it to Streamlit secrets or your .env file. "
+                "Get a free key at app.letta.com"
+            )
+
+        # Connect to Letta Cloud
+        self.client = Letta(token=LETTA_API_KEY)
+        self._agents = {}  # cache agent_id per student
+        print("Connected to Letta Cloud")
 
     def get_or_create_agent(self, student_id: str) -> str:
         """
-        Get or create one Letta agent for this student.
-        All three teaching agents share this same Letta agent.
+        Get or create ONE Letta Cloud agent per student.
+        Shared by all three teaching agents.
         """
-        if student_id in self._agent_ids:
-            return self._agent_ids[student_id]
+        if student_id in self._agents:
+            return self._agents[student_id]
 
-        # Create a new Letta agent with LLaMA inside
-        agent = self.client.create_agent(
-            name=f"student_{student_id}_memory",
+        # Check if agent already exists on Letta Cloud
+        try:
+            existing_agents = self.client.agents.list()
+            for agent in existing_agents:
+                if agent.name == f"tutor_memory_{student_id}":
+                    self._agents[student_id] = agent.id
+                    print(f"Found existing Letta agent for: {student_id}")
+                    return agent.id
+        except Exception:
+            pass
 
-            # LLM config — same LLaMA model, running via Ollama
-            llm_config=LLMConfig(
-                model=LLM_MODEL,
-                model_endpoint=OLLAMA_BASE_URL,
-                model_endpoint_type="ollama",
-                context_window=8192
-            ),
-
-            # Initial memory state
-            memory=ChatMemory(
-                human=json.dumps({
-                    "student_id": student_id,
-                    "current_level": "beginner",
-                    "current_topic": "",
-                    "learning_style": "code_first",
-                    "goal": "ai_engineer",
-                    "weak_areas": [],
-                    "mastered_concepts": []
-                }),
-                persona=MEMORY_PERSONA
-            )
+        # Create new agent on Letta Cloud
+        agent = self.client.agents.create(
+            name=f"tutor_memory_{student_id}",
+            system=MEMORY_PERSONA,
+            memory_blocks=[
+                {
+                    "label": "human",
+                    "value": json.dumps({
+                        "student_id":        student_id,
+                        "current_level":     "beginner",
+                        "current_topic":     "",
+                        "learning_style":    "code_first",
+                        "goal":              "ai_engineer",
+                        "weak_areas":        [],
+                        "mastered_concepts": []
+                    })
+                },
+                {
+                    "label": "persona",
+                    "value": MEMORY_PERSONA
+                }
+            ],
+            model="letta-free",  # free tier model on Letta Cloud
         )
 
-        self._agent_ids[student_id] = agent.id
-        print(f"Created Letta agent for student: {student_id} → {agent.id}")
+        self._agents[student_id] = agent.id
+        print(f"Created Letta Cloud agent for student: {student_id}")
         return agent.id
 
     # ─────────────────────────────────────────────
-    # Core Memory — always in context window
+    # Core Memory (RAM) — always in context
     # ─────────────────────────────────────────────
 
     def read_core_memory(self, student_id: str) -> dict:
-        """
-        Read student profile from core memory.
-        Called by Solver to get student level and learning style.
-        """
-        agent_id = self.get_or_create_agent(student_id)
-        memory = self.client.get_in_context_memory(agent_id)
-        human_block = memory.get_block("human")
+        """Read student profile from core memory."""
+        try:
+            agent_id = self.get_or_create_agent(student_id)
+            blocks   = self.client.agents.core_memory.retrieve(agent_id=agent_id)
 
-        if human_block:
-            try:
-                return json.loads(human_block.value)
-            except json.JSONDecodeError:
-                return {"raw": human_block.value}
-        return {}
+            for block in blocks:
+                if block.label == "human":
+                    try:
+                        return json.loads(block.value)
+                    except json.JSONDecodeError:
+                        return {"raw": block.value}
+            return {}
+        except Exception as e:
+            print(f"read_core_memory error: {e}")
+            return {}
 
     def update_core_memory(self, student_id: str, updates: dict):
-        """
-        Update student profile in core memory.
-        Called when student level or preferences change.
-        """
-        agent_id = self.get_or_create_agent(student_id)
-        current = self.read_core_memory(student_id)
-        current.update(updates)
-        self.client.update_in_context_memory(
-            agent_id,
-            section="human",
-            value=json.dumps(current)
-        )
+        """Update student profile in core memory."""
+        try:
+            agent_id = self.get_or_create_agent(student_id)
+            current  = self.read_core_memory(student_id)
+            current.update(updates)
+
+            self.client.agents.core_memory.modify(
+                agent_id=agent_id,
+                label="human",
+                value=json.dumps(current)
+            )
+        except Exception as e:
+            print(f"update_core_memory error: {e}")
 
     # ─────────────────────────────────────────────
-    # Archival Memory — long term storage
+    # Archival Memory (Disk) — searched on demand
     # ─────────────────────────────────────────────
-
-    def notify_memory(self, student_id: str, event: dict):
-        """
-        Send an event to the Letta agent and let the LLM
-        decide what to remember and how.
-
-        This is the CORRECT MemGPT approach —
-        the LLM reads the event and autonomously decides
-        whether to call core_memory_append, core_memory_replace,
-        archival_memory_insert, or do nothing.
-
-        Called by all three teaching agents after each interaction.
-        """
-        agent_id = self.get_or_create_agent(student_id)
-
-        # Send event as a message — LLM decides what to store
-        self.client.send_message(
-            agent_id=agent_id,
-            message=f"TUTOR EVENT: {json.dumps(event)}",
-            role="system"
-        )
 
     def write_archival_memory(self, student_id: str, data: dict):
-        """
-        Directly insert a record into archival memory.
-        Used for guaranteed storage of critical records
-        (assessment scores, misconceptions).
-        """
-        agent_id = self.get_or_create_agent(student_id)
-        self.client.insert_archival_memory(
-            agent_id,
-            memory=json.dumps(data)
-        )
+        """Write a memory record to archival storage."""
+        try:
+            agent_id = self.get_or_create_agent(student_id)
+            self.client.agents.archival_memory.create(
+                agent_id=agent_id,
+                text=json.dumps(data)
+            )
+        except Exception as e:
+            print(f"write_archival_memory error: {e}")
 
     def search_archival_memory(self, student_id: str, query: str) -> list[dict]:
-        """
-        Search archival memory by semantic similarity.
-        Returns relevant past records.
-        """
-        agent_id = self.get_or_create_agent(student_id)
-        results = self.client.get_archival_memory(
-            agent_id,
-            query=query,
-            limit=10
-        )
-
-        parsed = []
-        for r in results:
-            try:
-                parsed.append(json.loads(r.text))
-            except json.JSONDecodeError:
-                parsed.append({"raw": r.text})
-        return parsed
+        """Search archival memory by semantic similarity."""
+        try:
+            agent_id = self.get_or_create_agent(student_id)
+            results  = self.client.agents.archival_memory.list(
+                agent_id=agent_id,
+                query=query,
+                limit=10
+            )
+            parsed = []
+            for r in results:
+                try:
+                    parsed.append(json.loads(r.text))
+                except json.JSONDecodeError:
+                    parsed.append({"raw": r.text})
+            return parsed
+        except Exception as e:
+            print(f"search_archival_memory error: {e}")
+            return []
 
     # ─────────────────────────────────────────────
-    # Convenience methods used by teaching agents
+    # Convenience methods for teaching agents
     # ─────────────────────────────────────────────
 
     def get_mastered_concepts(self, student_id: str) -> list[str]:
-        """
-        Get list of mastered concepts.
-        Used by Solver to check which prerequisites student knows.
-        """
-        core = self.read_core_memory(student_id)
-        mastered = core.get("mastered_concepts", [])
-
-        # Also search archival for passed assessments
-        records = self.search_archival_memory(
-            student_id, "assessment passed mastered concept"
-        )
-        for r in records:
-            if r.get("type") == "feedback_given" and r.get("passed"):
-                concept = r.get("concept", "")
-                if concept and concept not in mastered:
-                    mastered.append(concept)
-
-        return mastered
+        """Get mastered concepts. Used by Solver for prerequisite check."""
+        try:
+            records = self.search_archival_memory(
+                student_id, "mastered concept assessment passed"
+            )
+            mastered = [
+                r.get("concept", "")
+                for r in records
+                if r.get("type") == "feedback_given" and r.get("passed")
+            ]
+            core         = self.read_core_memory(student_id)
+            core_mastered = core.get("mastered_concepts", [])
+            return list(set([c for c in mastered + core_mastered if c]))
+        except Exception:
+            return []
 
     def get_mistake_history(self, student_id: str, concept: str) -> list[dict]:
-        """
-        Get all past failed attempts for a concept.
-        Used by Feedback Agent to count attempts and spot patterns.
-        """
-        records = self.search_archival_memory(
-            student_id, f"failed wrong misconception {concept}"
-        )
-        return [
-            r for r in records
-            if r.get("concept") == concept and not r.get("passed", True)
-        ]
+        """Get past mistakes for a concept. Used by Feedback Agent."""
+        try:
+            records = self.search_archival_memory(
+                student_id, f"mistake wrong failed {concept}"
+            )
+            return [
+                r for r in records
+                if r.get("concept") == concept and not r.get("passed", True)
+            ]
+        except Exception:
+            return []
 
     def get_tested_questions(self, student_id: str, concept: str) -> list[str]:
-        """
-        Get questions already asked about a concept.
-        Used by Assessment Agent to avoid repeating questions.
-        """
-        records = self.search_archival_memory(
-            student_id, f"question asked {concept}"
-        )
-        return [
-            r.get("question", "")
-            for r in records
-            if r.get("type") == "question_asked" and r.get("concept") == concept
-        ]
+        """Get questions already asked. Used by Assessment Agent."""
+        try:
+            records = self.search_archival_memory(
+                student_id, f"question asked {concept}"
+            )
+            return [
+                r.get("question", "")
+                for r in records
+                if r.get("type") == "question_asked"
+                and r.get("concept") == concept
+            ]
+        except Exception:
+            return []
