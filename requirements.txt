@@ -1,15 +1,13 @@
-# Core LLM
-ollama>=0.1.0
+# LLM
 groq>=0.4.0
 
-# Memory Framework
-letta>=0.3.0
+# Memory
+letta-client>=0.1.0
 
-# Embedding + Vector DB
-FlagEmbedding==1.2.11
+# Embeddings — no torch needed
 sentence-transformers==2.7.0
-transformers==4.40.0
-torch==2.2.0
+
+# Vector DB
 chromadb>=0.4.0
 
 # Knowledge Graph
@@ -19,22 +17,16 @@ neo4j>=5.0.0
 langgraph>=0.1.0
 langchain>=0.2.0
 
-# Backend API
-fastapi>=0.110.0
-uvicorn>=0.27.0
-pydantic>=2.0.0
-websockets>=12.0
-
-# Document collection
+# Document processing
 pypdf>=4.0.0
 beautifulsoup4>=4.12.0
 requests>=2.31.0
 arxiv>=2.0.0
 
-# Utilities
-python-dotenv>=1.0.0
-tqdm>=4.66.0
-
 # Streamlit
 streamlit>=1.32.0
 streamlit-agraph>=0.0.45
+
+# Utilities
+python-dotenv>=1.0.0
+tqdm>=4.66.0
