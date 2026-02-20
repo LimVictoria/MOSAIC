@@ -53,7 +53,7 @@ class LettaClient:
             )
 
         # Connect to Letta Cloud
-        self.client = Letta(token=LETTA_API_KEY)
+        self.client = Letta(api_key=LETTA_API_KEY)
         self._agents = {}  # cache agent_id per student
         print("Connected to Letta Cloud")
 
