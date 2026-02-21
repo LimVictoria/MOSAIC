@@ -66,24 +66,15 @@ class LettaClient:
         self._agents = {}  # cache agent_id per student
         print("Connected to Letta Cloud")
 
-    def get_or_create_agent(self, student_id: str) -> str:
-        """
-        Get or create ONE Letta Cloud agent per student.
-        Shared by all three teaching agents.
-        """
-        if student_id in self._agents:
-            return self._agents[student_id]
-
-        # Check if agent already exists on Letta Cloud
-        try:
-            existing_agents = self.client.agents.list()
-            for agent in existing_agents:
-                if agent.name == f"tutor_memory_{student_id}":
-                    self._agents[student_id] = agent.id
-                    print(f"Found existing Letta agent for: {student_id}")
-                    return agent.id
-        except Exception:
-            pass
+    try:
+        existing_agents = self.client.agents.list()
+        for agent in existing_agents:
+            if agent.name == f"tutor_memory_{student_id}":
+                self._agents[student_id] = agent.id
+                print(f"Found existing Letta agent for: {student_id}")
+                return agent.id
+    except Exception as e:
+        print(f"Letta list agents error: {e}")
 
         # Create new agent on Letta Cloud
         try:
