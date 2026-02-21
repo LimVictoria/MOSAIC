@@ -336,8 +336,8 @@ def render_kg(kg_data: dict, height: int = 380):
 # ─────────────────────────────────────────────────────
 hc1, hc2 = st.columns([5, 1])
 with hc1:
-    st.markdown('<div class="tutor-title">🧠 MOSAICurriculum</div>', unsafe_allow_html=True)
-    st.markdown('<div class="tutor-subtitle">Multi-Agent AI Tutor</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tutor-title">MOSAICurriculum</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tutor-subtitle">Memory-Orchestrated Symbolic Agent Intelligent Curriculum</div>', unsafe_allow_html=True)
 with hc2:
     color = "#059669" if COMPONENTS_LOADED else "#EF4444"
     label = "● Ready" if COMPONENTS_LOADED else "● Error"
