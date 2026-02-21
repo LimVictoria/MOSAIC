@@ -140,6 +140,10 @@ hr { border-color: #E2E8F0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
+# DEBUG — remove after fixing
+import streamlit as st
+st.write("NEO4J_URI reading as:", st.secrets.get("NEO4J_URI", "NOT FOUND"))
+
 
 # ─────────────────────────────────────────────────────
 # Load all components once — cached across sessions
