@@ -11,7 +11,8 @@ def _get_secret(key, default=""):
         return os.getenv(key, default)
 
 LETTA_API_KEY  = _get_secret("LETTA_API_KEY", "")
-LETTA_BASE_URL = _get_secret("LETTA_BASE_URL", "https://api.letta.com")
+LETTA_BASE_URL = "https://api.letta.com"
+print(f"Letta base URL: {LETTA_BASE_URL}")
 
 class LettaClient:
     def __init__(self):
