@@ -8,7 +8,6 @@ from streamlit_agraph import agraph, Node, Edge, Config
 
 st.set_page_config(
     page_title="MOSAICurriculum",
-    page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -194,6 +193,7 @@ for key, val in {
     "messages": [], "student_id": "student_001",
     "current_concept": None, "current_question": None,
     "kg_data": None, "kg_visible": False, "last_kg_refresh": 0,
+    "response_style": "Balanced", "difficulty_override": "Auto",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -442,23 +442,6 @@ with col_left:
                         "agent": r.get("agent", "Solver")})
                     st.rerun()
 
-        st.markdown("---")
-        st.markdown('<div class="panel-header">Progress</div>', unsafe_allow_html=True)
-
-        progress = get_progress()
-        if progress:
-            m1, m2 = st.columns(2)
-            with m1: st.metric("Level", progress.get("current_level", "beginner").title())
-            with m2: st.metric("Topic", progress.get("current_topic", "") or "—")
-        else:
-            st.caption("Progress appears after first interaction")
-
-        if st.session_state.messages:
-            st.markdown("---")
-            if st.button("🗑 Clear chat", key="clear", use_container_width=True):
-                st.session_state.messages = []
-                st.rerun()
-
     # ── ASSESSMENT ──
     with tab_assess:
         st.markdown('<div class="panel-header">Test your understanding</div>', unsafe_allow_html=True)
@@ -554,38 +537,41 @@ with col_left:
             st.session_state.student_id = new_id
 
         st.markdown("---")
-        st.markdown('<div class="panel-header">System status</div>', unsafe_allow_html=True)
-        for slabel, active in {
-            "Components loaded": COMPONENTS_LOADED,
-            "Knowledge Graph":   st.session_state.kg_visible,
-            "Chat history":      len(st.session_state.messages) > 0,
-        }.items():
-            dot   = "status-online" if active else "status-offline"
-            color = "#059669" if active else "#94A3B8"
-            st.markdown(
-                f'<div style="display:flex;align-items:center;gap:0.5rem;font-size:0.72rem;'
-                f'color:{color};margin-bottom:0.35rem">'
-                f'<span class="status-dot {dot}"></span>{slabel}</div>',
-                unsafe_allow_html=True)
+        st.markdown('<div class="panel-header">Response style</div>', unsafe_allow_html=True)
+        st.session_state.response_style = st.selectbox(
+            "How detailed should responses be?",
+            ["Concise", "Balanced", "Detailed"],
+            index=["Concise", "Balanced", "Detailed"].index(st.session_state.response_style),
+            label_visibility="collapsed"
+        )
 
         st.markdown("---")
-        st.markdown('<div class="panel-header">Agents</div>', unsafe_allow_html=True)
-        for _, (tag, cls, desc) in {
-            "Solver":     ("SOLVER",   "tag-solver",     "Explains concepts"),
-            "Assessment": ("ASSESS",   "tag-assessment", "Tests understanding"),
-            "Feedback":   ("FEEDBACK", "tag-feedback",   "Diagnoses mistakes"),
-            "KG":         ("KG",       "tag-system",     "Builds knowledge graph"),
-        }.items():
-            st.markdown(
-                f'<div style="margin-bottom:0.5rem">'
-                f'<span class="agent-tag {cls}">{tag}</span> '
-                f'<span style="font-size:0.68rem;color:#64748B">{desc}</span></div>',
-                unsafe_allow_html=True)
+        st.markdown('<div class="panel-header">Difficulty level</div>', unsafe_allow_html=True)
+        st.session_state.difficulty_override = st.selectbox(
+            "Override auto-detected level",
+            ["Auto", "Beginner", "Intermediate", "Advanced"],
+            index=["Auto", "Beginner", "Intermediate", "Advanced"].index(st.session_state.difficulty_override),
+            label_visibility="collapsed"
+        )
+        st.caption("Auto uses your learning history to set the level.")
 
         st.markdown("---")
-        if st.toggle("Auto-refresh KG every 5s", value=False):
-            time.sleep(5)
-            st.rerun()
+        st.markdown('<div class="panel-header">Export</div>', unsafe_allow_html=True)
+        if st.session_state.messages:
+            lines = []
+            for msg in st.session_state.messages:
+                role  = "You" if msg["role"] == "user" else msg.get("agent", "Tutor")
+                lines.append(f"[{role}]\n{msg['content']}\n")
+            chat_text = "\n".join(lines)
+            st.download_button(
+                label="⬇ Download chat as .txt",
+                data=chat_text,
+                file_name="mosaic_chat.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+        else:
+            st.caption("No chat history to export yet.")
 
 # ══════════════════════════════════════════════════════
 # RIGHT — Chat output + KG subpanel
