@@ -22,7 +22,8 @@ html, body, [class*="css"] {
     color: #1E293B;
 }
 #MainMenu, footer { visibility: hidden; }
-header { visibility: hidden; }
+# header { visibility: hidden; }
+[data-testid="stSidebarCollapsedControl"] { visibility: visible !important; }
 header [data-testid="stSidebarCollapsedControl"],
 section[data-testid="collapsedControl"] { visibility: visible !important; display: flex !important; }
 .stDeployButton { display: none; }
