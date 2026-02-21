@@ -13,11 +13,15 @@ class Neo4jClient:
     """
 
     def __init__(self):
+        from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+        print(f"Connecting with URI: {NEO4J_URI}")
+        print(f"Connecting with USER: {NEO4J_USER}")
+        print(f"Connecting with PASSWORD: {NEO4J_PASSWORD[:5]}...")
+    
         self.driver = GraphDatabase.driver(
             NEO4J_URI,
             auth=(NEO4J_USER, NEO4J_PASSWORD)
         )
-        print("Connected to Neo4j")
 
     def close(self):
         self.driver.close()
