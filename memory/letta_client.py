@@ -77,33 +77,35 @@ class LettaClient:
             pass
 
         # Create new agent on Letta Cloud
-        agent = self.client.agents.create(
-            name=f"tutor_memory_{student_id}",
-            system=MEMORY_PERSONA,
-            memory_blocks=[
-                {
-                    "label": "human",
-                    "value": json.dumps({
-                        "student_id":        student_id,
-                        "current_level":     "beginner",
-                        "current_topic":     "",
-                        "learning_style":    "code_first",
-                        "goal":              "ai_engineer",
-                        "weak_areas":        [],
-                        "mastered_concepts": []
-                    })
-                },
-                {
-                    "label": "persona",
-                    "value": MEMORY_PERSONA
-                }
-            ],
-            model="letta-free",  # free tier model on Letta Cloud
-        )
-
-        self._agents[student_id] = agent.id
-        print(f"Created Letta Cloud agent for student: {student_id}")
-        return agent.id
+        try:
+            agent = self.client.agents.create(
+                name=f"tutor_memory_{student_id}",
+                memory_blocks=[
+                    {
+                        "label": "human",
+                        "value": json.dumps({
+                            "student_id":        student_id,
+                            "current_level":     "beginner",
+                            "current_topic":     "",
+                            "learning_style":    "code_first",
+                            "goal":              "ai_engineer",
+                            "weak_areas":        [],
+                            "mastered_concepts": []
+                        })
+                    },
+                    {
+                        "label": "persona",
+                        "value": "I am a student memory tracker for an AI tutor."
+                    }
+                ],
+                model="letta-free",
+            )
+            self._agents[student_id] = agent.id
+            print(f"Created Letta Cloud agent: {agent.id}")
+            return agent.id
+        except Exception as e:
+            print(f"Failed to create Letta agent: {e}")
+            raise
 
     # ─────────────────────────────────────────────
     # Core Memory (RAM) — always in context
