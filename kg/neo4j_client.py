@@ -32,7 +32,8 @@ class Neo4jClient:
             self.driver = None
 
     def close(self):
-        self.driver.close()
+        if self.driver:
+            self.driver.close()
 
     def query(self, cypher: str, params: dict = None) -> list:
         if self.driver is None:
