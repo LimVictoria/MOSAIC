@@ -221,6 +221,8 @@ Provide a clear step by step explanation.
 
             print(f"KG updated with: {main.get('name', concept)}")
 
+        # except Exception as e:
+        #     # Never crash the explanation if KG building fails
+        #     print(f"KG auto-build error (non-fatal): {e}")
         except Exception as e:
-            # Never crash the explanation if KG building fails
-            print(f"KG auto-build error (non-fatal): {e}")
+          raise e
