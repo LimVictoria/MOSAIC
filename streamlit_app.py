@@ -149,7 +149,7 @@ st.write("NEO4J_PASSWORD in secrets:", st.secrets.get("NEO4J_PASSWORD", "NOT FOU
 # Load all components once — cached across sessions
 # No FastAPI — agents called directly
 # ─────────────────────────────────────────────────────
-@st.cache_resource(ttl=0)
+@st.cache_resource(ttl=1800)
 def load_components():
     from llm_client import LLMClient
     from memory.letta_client import LettaClient
