@@ -36,7 +36,7 @@ class LettaClient:
         try:
             agent = self.client.agents.create(
                 name=f"tutor_memory_{student_id}",
-                model="openai/gpt-4o-mini",
+                model="letta-free",
                 memory_blocks=[
                     {
                         "label": "human",
