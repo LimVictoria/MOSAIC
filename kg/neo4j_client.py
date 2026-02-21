@@ -35,9 +35,15 @@ class Neo4jClient:
         self.driver.close()
 
     def query(self, cypher: str, params: dict = None) -> list:
-        with self.driver.session() as session:
-            result = session.run(cypher, params or {})
-            return [record.data() for record in result]
+        if self.driver is None:
+            return []
+        try:
+            with self.driver.session() as session:
+                result = session.run(cypher, params or {})
+                return [record.data() for record in result]
+        except Exception as e:
+            print(f"Query error: {e}")
+            return []
 
     # ── KG Builder writes ──────────────────────────
 
