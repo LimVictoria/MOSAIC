@@ -67,7 +67,7 @@ class LettaClient:
     def read_core_memory(self, student_id: str) -> dict:
         try:
             agent_id = self.get_or_create_agent(student_id)
-            blocks = self.client.agents.core_memory.retrieve(agent_id=agent_id)
+            blocks = self.client.agents.retrieve(agent_id=agent_id).memory.blocks
             for block in blocks:
                 if block.label == "human":
                     try:
@@ -84,8 +84,9 @@ class LettaClient:
             agent_id = self.get_or_create_agent(student_id)
             current = self.read_core_memory(student_id)
             current.update(updates)
-            self.client.agents.core_memory.modify(
-                agent_id=agent_id, label="human", value=json.dumps(current)
+            self.client.agents.modify(
+                agent_id=agent_id,
+                memory={"human": json.dumps(current)}
             )
         except Exception as e:
             print(f"update_core_memory error: {e}")
@@ -93,7 +94,7 @@ class LettaClient:
     def write_archival_memory(self, student_id: str, data: dict):
         try:
             agent_id = self.get_or_create_agent(student_id)
-            self.client.agents.archival_memory.create(
+            self.client.agents.passages.create(
                 agent_id=agent_id, text=json.dumps(data)
             )
         except Exception as e:
@@ -102,9 +103,7 @@ class LettaClient:
     def search_archival_memory(self, student_id: str, query: str) -> list[dict]:
         try:
             agent_id = self.get_or_create_agent(student_id)
-            results = self.client.agents.archival_memory.list(
-                agent_id=agent_id, query=query, limit=10
-            )
+            results = self.client.agents.passages.list(agent_id=agent_id)
             parsed = []
             for r in results:
                 try:
