@@ -48,7 +48,8 @@ class LLMClient:
     def _generate_groq(self, system_prompt, user_message, temperature, max_tokens) -> str:
         """Generate via Groq API."""
         response = self.groq_client.chat.completions.create(
-            model="llama-3.1-70b-versatile",
+            # model="llama-3.1-70b-versatile",
+            model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
