@@ -1,5 +1,6 @@
 # agents/assessment_agent.py
 # Tests student understanding and gives an objective score
+# Updates KG node colors during assessment
 
 import json
 from llm_client import LLMClient
@@ -38,13 +39,16 @@ class AssessmentAgent:
     Assessment Agent.
 
     Triggered after Solver explains a concept.
-    Always followed by the Feedback Agent regardless of score.
+    Always followed by Feedback Agent regardless of score.
+
+    KG color updates:
+    - yellow = concept is being assessed right now
 
     Reads from Letta:  what was already tested, student level
     Reads from KG:     related concepts to test together
     Reads from RAG:    misconceptions and question material
     Writes to Letta:   question asked, raw score
-    Writes to KG:      sets node status to yellow (being assessed)
+    Writes to KG:      sets node to yellow (being assessed)
     """
 
     def __init__(
@@ -62,6 +66,7 @@ class AssessmentAgent:
     def generate_question(self, student_id: str, concept: str) -> dict:
         """
         Generate one assessment question for a concept.
+        Sets KG node to yellow while being assessed.
 
         Returns:
             {
@@ -85,7 +90,7 @@ Generate ONE assessment question for:
 Concept:        {concept}
 Student Level:  {student_level}
 Related concepts to incorporate: {related[:3]}
-Common misconceptions to probe:  {misconceptions[:500]}
+Common misconceptions to probe:  {misconceptions[:500] if misconceptions else "None available"}
 Questions already asked (do NOT repeat): {already_tested}
 
 Return ONLY this JSON:
@@ -108,7 +113,7 @@ Return ONLY this JSON:
             clean         = response.strip().replace("```json", "").replace("```", "")
             question_data = json.loads(clean)
 
-            # Write to shared Letta memory — question asked
+            # Write to shared Letta memory
             self.letta.write_archival_memory(student_id, {
                 "type":          "question_asked",
                 "concept":       concept,
@@ -116,12 +121,14 @@ Return ONLY this JSON:
                 "question_type": question_data.get("question_type", "")
             })
 
-            # Update KG node to yellow — being assessed
+            # ── KG: set node to YELLOW — being assessed ──
             self.neo4j.update_node_status(concept, "yellow")
 
             return question_data
 
         except json.JSONDecodeError:
+            # Fallback question if JSON parsing fails
+            self.neo4j.update_node_status(concept, "yellow")
             return {
                 "question":               f"Explain {concept} in your own words and provide a code example.",
                 "question_type":          "explanation",
@@ -140,6 +147,7 @@ Return ONLY this JSON:
     ) -> dict:
         """
         Objectively evaluate a student's answer.
+        Note: KG color update happens in Feedback Agent after this.
 
         Returns:
             {
