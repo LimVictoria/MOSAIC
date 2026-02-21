@@ -1,7 +1,8 @@
-# AI Engineering Tutor
+# MOSAIC
 
 Multi-agent AI tutor for learning AI engineering concepts.
 Built with LLaMA 3.1 70B, Letta memory, RAG (ChromaDB + BGE-large), Neo4j knowledge graph, and Streamlit.
+Access @ https://mosaicurriculum.streamlit.app/
 
 ---
 
