@@ -140,6 +140,9 @@ hr { border-color: #E2E8F0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
+# DEBUG — remove after fixing
+st.write("NEO4J_URI in secrets:", st.secrets.get("NEO4J_URI", "NOT FOUND"))
+st.write("NEO4J_USER in secrets:", st.secrets.get("NEO4J_USER", "NOT FOUND"))
 
 # ─────────────────────────────────────────────────────
 # Load all components once — cached across sessions
@@ -189,9 +192,6 @@ except Exception as e:
     LOAD_ERROR        = str(e)
     components        = {}
 
-# DEBUG — remove after fixing
-import streamlit as st
-st.write("NEO4J_URI reading as:", st.secrets.get("NEO4J_URI", "NOT FOUND"))
 
 # ─────────────────────────────────────────────────────
 # Constants
