@@ -9,7 +9,7 @@ from streamlit_agraph import agraph, Node, Edge, Config
 st.set_page_config(
     page_title="MOSAICurriculum",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 st.markdown("""
@@ -21,7 +21,10 @@ html, body, [class*="css"] {
     background-color: #F8FAFC;
     color: #1E293B;
 }
-#MainMenu, footer, header { visibility: hidden; }
+#MainMenu, footer { visibility: hidden; }
+header { visibility: hidden; }
+header [data-testid="stSidebarCollapsedControl"],
+section[data-testid="collapsedControl"] { visibility: visible !important; display: flex !important; }
 .stDeployButton { display: none; }
 .stApp {
     background: linear-gradient(135deg, #F0FDF4 0%, #F0F9FF 50%, #FAFAFA 100%);
@@ -332,8 +335,8 @@ def render_kg(kg_data: dict, height: int = 380):
 # ─────────────────────────────────────────────────────
 hc1, hc2 = st.columns([5, 1])
 with hc1:
-    st.markdown('<div class="tutor-title"> MOSAICurriculum</div>', unsafe_allow_html=True)
-    st.markdown('<div class="tutor-subtitle">Memory-Orchestrated Symbolic Agent Intelligent Curriculum</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tutor-title">🧠 MOSAICurriculum</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tutor-subtitle">Multi-Agent AI Tutor</div>', unsafe_allow_html=True)
 with hc2:
     color = "#059669" if COMPONENTS_LOADED else "#EF4444"
     label = "● Ready" if COMPONENTS_LOADED else "● Error"
