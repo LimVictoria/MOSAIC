@@ -2,6 +2,7 @@
 # Neo4j connection and core operations
 
 from neo4j import GraphDatabase
+from config import KG_VISIBLE_THRESHOLD
 
 class Neo4jClient:
     """
