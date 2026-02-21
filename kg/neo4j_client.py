@@ -13,15 +13,23 @@ class Neo4jClient:
     """
 
     def __init__(self):
-        from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
-        print(f"Connecting with URI: {NEO4J_URI}")
-        print(f"Connecting with USER: {NEO4J_USER}")
-        print(f"Connecting with PASSWORD: {NEO4J_PASSWORD[:5]}...")
+        import streamlit as st
     
-        self.driver = GraphDatabase.driver(
-            NEO4J_URI,
-            auth=(NEO4J_USER, NEO4J_PASSWORD)
-        )
+        uri      = st.secrets.get("NEO4J_URI", "")
+        user     = st.secrets.get("NEO4J_USER", "neo4j")  
+        password = st.secrets.get("NEO4J_PASSWORD", "")
+
+        try:
+            self.driver = GraphDatabase.driver(
+                uri,
+                auth=(user, password)
+            )
+            # Test connection
+            self.driver.verify_connectivity()
+            print(f"Neo4j connected: {uri}")
+        except Exception as e:
+            print(f"Neo4j connection failed: {e}")
+            self.driver = None
 
     def close(self):
         self.driver.close()
