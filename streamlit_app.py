@@ -141,9 +141,9 @@ hr { border-color: #E2E8F0 !important; }
 """, unsafe_allow_html=True)
 
 # DEBUG — remove after fixing
-# st.write("NEO4J_URI in secrets:", st.secrets.get("NEO4J_URI", "NOT FOUND"))
-# st.write("NEO4J_USER in secrets:", st.secrets.get("NEO4J_USER", "NOT FOUND"))
-# st.write("NEO4J_PASSWORD in secrets:", st.secrets.get("NEO4J_PASSWORD", "NOT FOUND")[:5] + "...")
+st.write("NEO4J_URI in secrets:", st.secrets.get("NEO4J_URI", "NOT FOUND"))
+st.write("NEO4J_USER in secrets:", st.secrets.get("NEO4J_USER", "NOT FOUND"))
+st.write("NEO4J_PASSWORD in secrets:", st.secrets.get("NEO4J_PASSWORD", "NOT FOUND")[:5] + "...")
 
 # ─────────────────────────────────────────────────────
 # Load all components once — cached across sessions
