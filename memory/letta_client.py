@@ -7,8 +7,17 @@ import os
 from letta_client import Letta
 
 # Read from environment / Streamlit secrets
-LETTA_API_KEY  = os.getenv("LETTA_API_KEY", "")
-LETTA_BASE_URL = os.getenv("LETTA_BASE_URL", "https://inference.letta.com")
+# LETTA_API_KEY  = os.getenv("LETTA_API_KEY", "")
+# LETTA_BASE_URL = os.getenv("LETTA_BASE_URL", "https://inference.letta.com")
+def _get_secret(key, default=""):
+    try:
+        import streamlit as st
+        return st.secrets.get(key, default) or os.getenv(key, default)
+    except Exception:
+        return os.getenv(key, default)
+
+LETTA_API_KEY  = _get_secret("LETTA_API_KEY", "")
+LETTA_BASE_URL = _get_secret("LETTA_BASE_URL", "https://inference.letta.com")
 
 MEMORY_PERSONA = """
 You are the memory system for an AI engineering tutor.
