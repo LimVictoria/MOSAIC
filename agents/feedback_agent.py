@@ -1,6 +1,7 @@
 # agents/feedback_agent.py
-# Tells student exactly what is right and wrong — always runs after assessment
-# Most consequential agent — makes key decisions about what happens next
+# Diagnoses what was right and wrong
+# Makes key decisions about what happens next
+# Updates KG node colors based on assessment result
 
 from llm_client import LLMClient
 from rag.retriever import RAGRetriever
@@ -34,12 +35,20 @@ class FeedbackAgent:
     Triggered ALWAYS after Assessment — pass or fail.
     Most powerful agent — makes key decisions about what happens next.
 
-    Reads from Letta:  full mistake history and patterns (heaviest reader)
-    Reads from KG:     prerequisite chain to trace root cause of mistakes
-    Reads from RAG:    explanation strategies for specific misconceptions
-    Writes to Letta:   richest diagnosis data of all three agents
-    Writes to KG:      updates node color based on assessment result
-    Decides:           re-teach (call Solver) OR advance to next concept
+    KG color updates (the most important agent for KG):
+    - green  = passed (score >= 70) — concept mastered
+    - red    = failed 3+ times — serious weak area
+    - orange = failed with weak prerequisites — prereq gap
+    - yellow = failed but first/second attempt — still learning
+
+    Also marks weak prerequisite nodes red when a prereq gap is found.
+
+    Reads from Letta:  full mistake history (heaviest reader)
+    Reads from KG:     prerequisite chain to trace root cause
+    Reads from RAG:    explanation strategies for misconceptions
+    Writes to Letta:   richest diagnosis data
+    Writes to KG:      updates node colors based on result
+    Decides:           re_teach / advance / practice_more
     """
 
     def __init__(
@@ -64,7 +73,14 @@ class FeedbackAgent:
     ) -> dict:
         """
         Give detailed feedback on an assessment result.
-        Always called regardless of whether the student passed or failed.
+        Always called regardless of pass or fail.
+        Updates KG node color based on result.
+
+        KG color logic:
+          score >= 70 (passed)        → GREEN  ✓ mastered
+          failed, attempt >= 3        → RED    serious weak area
+          failed, weak prerequisites  → ORANGE prereq gap
+          failed, attempt 1 or 2      → YELLOW still learning
 
         Returns:
             {
@@ -73,7 +89,7 @@ class FeedbackAgent:
                 "what_was_wrong": [...],
                 "root_cause":     "...",
                 "next_action":    "re_teach / advance / practice_more",
-                "re_teach_focus": "specific aspect to re-teach if needed",
+                "re_teach_focus": "...",
                 "score":          int,
                 "passed":         bool
             }
@@ -101,18 +117,18 @@ class FeedbackAgent:
             rag_docs         = self.retriever.retrieve_for_feedback(misconception)
             strategy_context = "\n".join([doc["text"] for doc in rag_docs[:2]])
 
-        # 4. Build prompt
+        # 4. Build feedback prompt
         user_message = f"""
 Generate precise feedback for this assessment result:
 
-Concept tested:    {concept}
-Question:          {question}
-Student answer:    {student_answer}
-Score:             {score}/100
-Passed:            {passed}
-What was right:    {what_was_right}
-What was wrong:    {what_was_wrong}
-Main misconception:{misconception}
+Concept tested:     {concept}
+Question:           {question}
+Student answer:     {student_answer}
+Score:              {score}/100
+Passed:             {passed}
+What was right:     {what_was_right}
+What was wrong:     {what_was_wrong}
+Main misconception: {misconception}
 
 Student history on this concept:
   Previous attempts: {attempt_count - 1}
@@ -121,7 +137,7 @@ Student history on this concept:
 Weak prerequisites found in KG:
   {[p["name"] for p in weak_prereqs[:3]] if weak_prereqs else "None identified"}
 
-Explanation strategy context:
+Strategy context:
   {strategy_context[:500] if strategy_context else "Not available"}
 
 Write feedback that:
@@ -168,8 +184,19 @@ Write feedback that:
             "next_action":    next_action
         })
 
-        # 9. Update KG node color
-        self._update_kg_node(concept, passed, attempt_count, weak_prereqs)
+        # 9. ── UPDATE KG NODE COLOR ──
+        # This is where the map visually reflects student understanding
+        self._update_kg_node(concept, passed, score, attempt_count, weak_prereqs)
+
+        # 10. If student passed, update Letta core memory mastered concepts
+        if passed:
+            core = self.letta.read_core_memory(student_id)
+            mastered = core.get("mastered_concepts", [])
+            if concept not in mastered:
+                mastered.append(concept)
+                self.letta.update_core_memory(student_id, {
+                    "mastered_concepts": mastered
+                })
 
         return {
             "feedback_text":  feedback_text,
@@ -190,11 +217,11 @@ Write feedback that:
         weak_prereqs: list
     ) -> str:
         """
-        Decide what happens after feedback is given.
+        Decide what happens after feedback.
 
         Returns:
-            "advance"       — passed cleanly, move to next concept
-            "practice_more" — passed but shaky, more practice needed
+            "advance"       — passed cleanly (score >= 90), move on
+            "practice_more" — passed but shaky (70-89), more practice
             "re_teach"      — failed, call Solver to re-explain
         """
         if passed and score >= 90:
@@ -208,16 +235,35 @@ Write feedback that:
         self,
         concept: str,
         passed: bool,
+        score: int,
         attempt_count: int,
         weak_prereqs: list
     ):
-        """Update KG node color to reflect assessment result."""
+        """
+        Update KG node color to visually reflect student understanding.
+
+        Color meanings:
+          GREEN  (#10B981) — passed, concept mastered
+          RED    (#EF4444) — failed 3+ times, serious weak area
+          ORANGE (#F97316) — failed with prereq gap detected
+          YELLOW (#F59E0B) — failed but still early attempts
+        """
         if passed:
+            # ── GREEN — student understands this concept ──
             self.neo4j.update_node_status(concept, "green")
+
         elif attempt_count >= 3:
+            # ── RED — failed 3+ times, serious problem ──
             self.neo4j.update_node_status(concept, "red")
+
         elif weak_prereqs:
+            # ── ORANGE — prerequisite gap is the root cause ──
             self.neo4j.update_node_status(concept, "orange")
+
+            # Also mark the weak prerequisite RED
+            # so student can see what they actually need to fix
             self.neo4j.update_node_status(weak_prereqs[0]["name"], "red")
+
         else:
+            # ── YELLOW — failed but still early, keep trying ──
             self.neo4j.update_node_status(concept, "yellow")
