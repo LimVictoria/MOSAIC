@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="MOSAICurriculum",
     page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 st.markdown("""
@@ -348,6 +348,46 @@ if not COMPONENTS_LOADED:
 st.markdown("---")
 
 # ─────────────────────────────────────────────────────
+# SIDEBAR — Knowledge Graph
+# ─────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown('<div class="panel-header">Knowledge Graph</div>', unsafe_allow_html=True)
+
+    # Refresh KG data periodically
+    now = time.time()
+    if now - st.session_state.last_kg_refresh > 5:
+        kg                               = get_kg_data()
+        st.session_state.kg_data         = kg
+        st.session_state.kg_visible      = kg.get("visible", False)
+        st.session_state.last_kg_refresh = now
+
+    node_count = st.session_state.kg_data.get("node_count", 0) if st.session_state.kg_data else 0
+    st.caption(f"🕸️ {node_count} concepts indexed")
+
+    if st.session_state.kg_visible and st.session_state.kg_data:
+        # Compact legend (2 columns to fit sidebar)
+        leg_cols = st.columns(2)
+        for i, (status, slabel) in enumerate(STATUS_LABELS.items()):
+            with leg_cols[i % 2]:
+                st.markdown(
+                    f'<div style="display:flex;align-items:center;gap:0.25rem;margin-bottom:0.4rem">'
+                    f'<div style="width:8px;height:8px;border-radius:50%;'
+                    f'background:{STATUS_COLORS[status]};flex-shrink:0"></div>'
+                    f'<span style="font-size:0.57rem;color:#64748B;white-space:nowrap">{slabel}</span></div>',
+                    unsafe_allow_html=True)
+
+        render_kg(st.session_state.kg_data, height=420)
+        st.caption("💡 Right-click → Save image as... to export PNG")
+    else:
+        st.markdown("""
+        <div style="text-align:center;padding:2rem 1rem;color:#94A3B8">
+            <div style="font-size:1.8rem">🕸️</div>
+            <div style="font-size:0.72rem;margin-top:0.5rem">
+                Graph appears after 2+ concepts are indexed
+            </div>
+        </div>""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────
 # MAIN LAYOUT
 # Left  = input, prompts, assessment, progress, settings
 # Right = chat messages + KG subpanel (expander)
@@ -407,13 +447,6 @@ with col_left:
 
         progress = get_progress()
         if progress:
-            pct = progress.get("progress_percent", 0)
-            st.markdown(
-                f'<div style="display:flex;justify-content:space-between;font-size:0.7rem;color:#64748B;margin-bottom:0.3rem">'
-                f'<span>Mastered {progress["mastered_count"]} / {progress["total_concepts"]}</span>'
-                f'<span style="color:#059669;font-weight:700">{pct}%</span></div>'
-                f'<div class="progress-bar-bg"><div class="progress-bar-fill" style="width:{pct}%"></div></div>',
-                unsafe_allow_html=True)
             m1, m2 = st.columns(2)
             with m1: st.metric("Level", progress.get("current_level", "beginner").title())
             with m2: st.metric("Topic", progress.get("current_topic", "") or "—")
@@ -563,56 +596,10 @@ with col_right:
     st.markdown('<div class="panel-header">Conversation</div>', unsafe_allow_html=True)
 
     if not st.session_state.messages:
-        st.markdown("""
-        <div style="text-align:center;padding:3rem 1rem;border:1px dashed #E2E8F0;
-             border-radius:10px;background:#FAFAFA;margin-bottom:1rem">
-            <div style="font-size:2rem">🧠</div>
-            <div style="font-family:'Syne',sans-serif;font-size:1rem;color:#475569;
-                 margin-top:0.6rem;font-weight:600">Ready to learn</div>
-            <div style="font-size:0.75rem;color:#94A3B8;margin-top:0.4rem">
-                Ask any AI engineering question on the left
-            </div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            '<div style="padding:2rem 0;color:#94A3B8;font-size:0.78rem;text-align:center">'
+            'Ask a question to get started.</div>',
+            unsafe_allow_html=True)
     else:
         for msg in st.session_state.messages:
             render_message(msg)
-
-    # ── KG subpanel ──
-    st.markdown("---")
-
-    # Refresh KG data periodically
-    now = time.time()
-    if now - st.session_state.last_kg_refresh > 5:
-        kg                               = get_kg_data()
-        st.session_state.kg_data         = kg
-        st.session_state.kg_visible      = kg.get("visible", False)
-        st.session_state.last_kg_refresh = now
-
-    node_count = st.session_state.kg_data.get("node_count", 0) if st.session_state.kg_data else 0
-
-    with st.expander(
-        f"🕸️  Knowledge Graph  ·  {node_count} concepts indexed",
-        expanded=st.session_state.kg_visible
-    ):
-        if st.session_state.kg_visible and st.session_state.kg_data:
-            # Compact legend
-            leg_cols = st.columns(6)
-            for i, (status, slabel) in enumerate(STATUS_LABELS.items()):
-                with leg_cols[i]:
-                    st.markdown(
-                        f'<div style="display:flex;align-items:center;gap:0.25rem;margin-bottom:0.4rem">'
-                        f'<div style="width:8px;height:8px;border-radius:50%;'
-                        f'background:{STATUS_COLORS[status]};flex-shrink:0"></div>'
-                        f'<span style="font-size:0.57rem;color:#64748B;white-space:nowrap">{slabel}</span></div>',
-                        unsafe_allow_html=True)
-
-            render_kg(st.session_state.kg_data, height=400)
-            st.caption("💡 Right-click the graph → Save image as... to export PNG")
-        else:
-            st.markdown("""
-            <div style="text-align:center;padding:1.5rem;color:#94A3B8">
-                <div style="font-size:1.4rem">🕸️</div>
-                <div style="font-size:0.75rem;margin-top:0.4rem">
-                    Graph appears after 2+ concepts are indexed
-                </div>
-            </div>""", unsafe_allow_html=True)
