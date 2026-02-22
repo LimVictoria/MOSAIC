@@ -591,5 +591,8 @@ with col_right:
             'Ask a question to get started.</div>',
             unsafe_allow_html=True)
     else:
-        for msg in reversed(st.session_state.messages):
-            render_message(msg)
+        messages = st.session_state.messages
+        for i in range(len(messages) - 1, -1, -2):
+            if i >= 1:
+                render_message(messages[i])    # assistant reply
+                render_message(messages[i-1])  # user prompt above it...
