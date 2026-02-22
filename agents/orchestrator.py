@@ -159,7 +159,14 @@ class Orchestrator:
     def _classify(self, state: TutorState) -> TutorState:
         message = state["message"].strip().lower()
 
-        # 1. Check if this is a follow-up "yes/no" to a pending concept
+        # 1. Explicit assessment — always takes priority over everything
+        assessment_words = ["test me", "quiz me", "assess me", "give me a question", "practice question"]
+        if any(w in message for w in assessment_words):
+            concept = self.pending_concept or self._extract_concept(state["message"])
+            self.pending_concept = None
+            return {**state, "intent": "assessment", "concept": concept}
+
+        # 2. Check if this is a follow-up "yes/no" to a pending concept
         if self.pending_concept:
             try:
                 answer = self.llm.generate(
@@ -188,13 +195,7 @@ class Orchestrator:
         if any(message == w or message.startswith(w + " ") for w in casual_words):
             return {**state, "intent": "chat"}
 
-        # 3. Explicit assessment request
-        assessment_words = ["test me", "quiz me", "assess me", "give me a question", "practice question"]
-        if any(w in message for w in assessment_words):
-            concept = self._extract_concept(state["message"])
-            return {**state, "intent": "assessment", "concept": concept}
-
-        # 4. Everything else — check if technical, then route to brief answer
+        # 3. Everything else — check if technical, then route to brief answer
         try:
             answer = self.llm.generate(
                 system_prompt=IS_TECHNICAL_PROMPT,
