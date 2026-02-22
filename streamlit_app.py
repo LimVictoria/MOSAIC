@@ -604,6 +604,13 @@ with col_left:
             
             except Exception as e:
                 st.error(f"RAG check failed: {e}")
+        if st.button("🗑 Clear Pinecone", use_container_width=True):
+            try:
+                retriever = components["retriever"]
+                retriever.index.delete(delete_all=True, namespace="knowledge_base")
+                st.success("Pinecone cleared — reboot app to re-ingest")
+            except Exception as e:
+                st.error(f"Clear failed: {e}")
             
 
 # ══════════════════════════════════════════════════════
