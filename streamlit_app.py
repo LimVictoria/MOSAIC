@@ -591,5 +591,5 @@ with col_right:
             'Ask a question to get started.</div>',
             unsafe_allow_html=True)
     else:
-        for msg in st.session_state.messages:
+        for msg in reversed(st.session_state.messages):
             render_message(msg)
