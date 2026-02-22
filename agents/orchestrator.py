@@ -1,5 +1,5 @@
 # agents/orchestrator.py
-# Two-stage routing orchestrator
+# Two-stage routing orchestrator with "quick answer + offer deeper" flow
 
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
@@ -18,7 +18,8 @@ class TutorState(TypedDict):
     re_teach_focus:    str
 
 
-# ── Stage 1: Is this a learning request? ──────────────────────────────────────
+# ── Prompts ───────────────────────────────────────────────────────────────────
+
 STAGE1_PROMPT = """
 You are a message classifier for an AI tutoring system.
 
@@ -32,13 +33,13 @@ Answer YES if:
 Answer NO if:
 - It is casual conversation ("hi", "how are you", "thanks", "what do you do")
 - It is a general question about the system ("what can you help with", "who are you")
-- It is a simple yes/no or factual question not requiring a lesson
-- It is feedback or a reaction ("that makes sense", "ok got it", "interesting")
+- It is a simple yes/no or follow-up ("yes please", "no thanks", "ok", "sure", "go ahead")
+- It is a reaction or feedback ("that makes sense", "ok got it", "interesting")
+- It is a conversational technical question that could be answered briefly
 
 Reply with ONLY one word: YES or NO.
 """
 
-# ── Stage 2: What is the concept and mode? ───────────────────────────────────
 STAGE2_PROMPT = """
 You are a concept extractor for an AI tutoring system.
 
@@ -57,40 +58,57 @@ Rules:
 - MODE is "teach" for everything else
 """
 
-# ── Chat handler ─────────────────────────────────────────────────────────────
 CHAT_PROMPT = """
 You are MOSAIC, a friendly AI tutor specialising in AI engineering and data science.
 
-Have a natural, warm conversation. Rules:
-- Keep replies concise and friendly
-- If they ask what you can do, briefly explain you can teach AI/ML concepts and test understanding
-- Never launch into a full lesson unprompted
-- If they seem curious about a topic, you can offer to explain it in depth
+Your job here is to give a SHORT, conversational answer to the student's question — NOT a full lesson.
+
+Rules:
+- Answer in 2-4 sentences maximum
+- Be warm and clear
+- At the end, ALWAYS ask: "Would you like me to go deeper on this?"
+- Do NOT use bullet points, headers, or code blocks
+- Do NOT teach a full lesson — just give a brief, friendly answer
+"""
+
+FOLLOWUP_PROMPT = """
+You are a message classifier.
+
+The student just received a brief answer and was asked "Would you like me to go deeper on this?"
+
+Did they say YES (they want more detail / a full explanation)?
+
+Answer YES if they said: yes, sure, please, go ahead, yeah, yep, definitely, of course, elaborate, more, tell me more, explain more, deeper, full explanation
+Answer NO if they said: no, nope, thanks, that's enough, i'm good, ok thanks, no thanks
+
+Reply with ONLY one word: YES or NO.
 """
 
 
 class Orchestrator:
     """
-    Two-stage routing orchestrator.
+    Two-stage routing with conversational bridge.
 
-    Stage 1: Is this a learning request? (YES / NO)
-      NO  → Chat handler
-      YES → Stage 2
-
-    Stage 2: Extract concept + mode (teach / test)
-      teach → Solver Agent
-      test  → Assessment Agent → Feedback Agent
-      Feedback re_teach → Solver Agent
+    Flow:
+      message → Stage 1 (learning request?)
+        NO  → check if follow-up "yes" to pending concept
+                yes pending + user said yes → Solver (full lesson)
+                otherwise → Chat (short answer + offer deeper)
+        YES → Stage 2 (extract concept + mode)
+                teach → Solver
+                test  → Assessment → Feedback
     """
 
     def __init__(self, solver, assessment, feedback, neo4j, letta):
-        self.solver     = solver
-        self.assessment = assessment
-        self.feedback   = feedback
-        self.neo4j      = neo4j
-        self.letta      = letta
-        self.llm        = solver.llm
+        self.solver          = solver
+        self.assessment      = assessment
+        self.feedback        = feedback
+        self.neo4j           = neo4j
+        self.letta           = letta
+        self.llm             = solver.llm
         self.last_agent_used = None
+        # Stores concept from last chat answer, waiting for "yes go deeper"
+        self.pending_concept: str | None = None
         self.graph = self._build_graph()
 
     def _build_graph(self):
@@ -105,14 +123,12 @@ class Orchestrator:
 
         workflow.set_entry_point("stage1")
 
-        # Stage 1 → chat or stage2
         workflow.add_conditional_edges(
             "stage1",
-            lambda s: "stage2" if s["intent"] == "learn" else "chat",
-            {"chat": "chat", "stage2": "stage2"}
+            self._route_stage1,
+            {"chat": "chat", "stage2": "stage2", "solver": "solver"}
         )
 
-        # Stage 2 → solver or assessment
         workflow.add_conditional_edges(
             "stage2",
             lambda s: "solver" if s["intent"] == "teach" else "assessment",
@@ -148,12 +164,28 @@ class Orchestrator:
         self.last_agent_used = result.get("agent_used", "Solver")
         return result.get("response", "I could not process that request.")
 
-    # ── Stage 1: Learning request or not? ────────────────────────────────────
+    # ── Stage 1 ───────────────────────────────────────────────────────────────
     def _stage1_classify(self, state: TutorState) -> TutorState:
-        """Binary: is this a learning request?"""
-        # Fast keyword shortcuts — no LLM needed
         message = state["message"].strip().lower()
 
+        # Check if this is a follow-up "yes" to a pending concept
+        if self.pending_concept:
+            try:
+                answer = self.llm.generate(
+                    system_prompt=FOLLOWUP_PROMPT,
+                    user_message=state["message"]
+                ).strip().upper()
+                if answer.startswith("YES"):
+                    # User wants deeper — route to solver with pending concept
+                    concept = self.pending_concept
+                    self.pending_concept = None
+                    return {**state, "intent": "solver", "concept": concept}
+                else:
+                    self.pending_concept = None
+            except Exception:
+                self.pending_concept = None
+
+        # Fast keyword shortcuts
         definite_chat = [
             "hi", "hello", "hey", "how are you", "what do you do",
             "who are you", "thanks", "thank you", "good morning",
@@ -162,19 +194,19 @@ class Orchestrator:
             "that makes sense", "got it", "i see", "interesting",
             "what can you do", "what can you help",
         ]
-        if any(message == w or message.startswith(w) for w in definite_chat):
-            return {**state, "intent": "chat"}
-
         definite_learn = [
-            "explain", "what is ", "what are ", "how does", "how do",
-            "teach me", "tell me about", "describe", "define",
+            "explain ", "teach me", "tell me about", "describe ",
             "help me understand", "test me", "quiz me", "assess me",
             "give me a question", "i want to learn", "i want to understand",
         ]
+
+        if any(message == w or message.startswith(w) for w in definite_chat):
+            return {**state, "intent": "chat"}
+
         if any(w in message for w in definite_learn):
             return {**state, "intent": "learn"}
 
-        # Ambiguous — ask the LLM
+        # LLM for ambiguous messages
         try:
             answer = self.llm.generate(
                 system_prompt=STAGE1_PROMPT,
@@ -186,16 +218,24 @@ class Orchestrator:
 
         return {**state, "intent": intent}
 
-    # ── Stage 2: Extract concept + teach vs test ──────────────────────────────
+    def _route_stage1(self, state: TutorState) -> str:
+        intent = state["intent"]
+        if intent == "solver":
+            return "solver"
+        elif intent == "learn":
+            return "stage2"
+        else:
+            return "chat"
+
+    # ── Stage 2 ───────────────────────────────────────────────────────────────
     def _stage2_extract(self, state: TutorState) -> TutorState:
-        """Extract concept and whether to teach or test."""
         try:
             raw = self.llm.generate(
                 system_prompt=STAGE2_PROMPT,
                 user_message=state["message"]
             ).strip()
 
-            concept = "Unknown Concept"
+            concept = ""
             mode    = "teach"
 
             for line in raw.splitlines():
@@ -206,8 +246,7 @@ class Orchestrator:
                     mode_raw = line.split(":", 1)[1].strip().lower()
                     mode = "test" if "test" in mode_raw else "teach"
 
-            # Safety: if concept is vague, use the raw message as fallback
-            if not concept or concept.lower() in ("current topic", "unknown", "unknown concept", ""):
+            if not concept or concept.lower() in ("current topic", "unknown", ""):
                 concept = state["message"][:60]
 
         except Exception:
@@ -218,13 +257,31 @@ class Orchestrator:
 
     # ── Handlers ──────────────────────────────────────────────────────────────
     def _run_chat(self, state: TutorState) -> TutorState:
+        """Short conversational answer + extract concept for pending follow-up."""
         try:
             response = self.llm.generate(
                 system_prompt=CHAT_PROMPT,
                 user_message=state["message"]
             )
+
+            # Extract concept in background so we can go deeper if user says yes
+            try:
+                raw = self.llm.generate(
+                    system_prompt=STAGE2_PROMPT,
+                    user_message=state["message"]
+                ).strip()
+                for line in raw.splitlines():
+                    if line.strip().upper().startswith("CONCEPT:"):
+                        concept = line.split(":", 1)[1].strip()
+                        if concept and concept.lower() not in ("current topic", "unknown", ""):
+                            self.pending_concept = concept
+                            break
+            except Exception:
+                pass
+
         except Exception as e:
             response = f"Something went wrong: {e}"
+
         return {**state, "response": response, "agent_used": "Solver"}
 
     def _run_solver(self, state: TutorState) -> TutorState:
