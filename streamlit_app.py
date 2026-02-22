@@ -174,10 +174,11 @@ except Exception as e:
     LOAD_ERROR        = str(e)
     components        = {}
 
-if COMPONENTS_LOADED:
+if COMPONENTS_LOADED and not st.session_state.get("ingestion_done"):
     with st.spinner("Checking knowledge base..."):
         from rag.fetch_docs import run_ingestion
         run_ingestion()
+    st.session_state.ingestion_done = True
 
 # ─────────────────────────────────────────────────────
 # Constants
