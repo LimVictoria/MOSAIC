@@ -1,6 +1,12 @@
 # MOSAICurriculum
 
 **Memory-Orchestrated Symbolic Agent Intelligent Curriculum**
+Memory → Letta Cloud persistent memory
+Orchestrated → LangGraph Orchestrator routing all messages
+Symbolic → Neo4j Knowledge Graph (symbolic representation of concepts)
+Agent → Multi-agent system (Solver, Assessment, Feedback, KG Builder)
+Intelligent → LLM-powered reasoning via Groq/llama
+Curriculum → The tutoring and learning domain
 
 Multi-agent AI tutor for learning Data Science and AI/ML concepts.
 Built with LLaMA 3.3 70B, Letta Cloud memory, RAG (Pinecone + BGE-small), Neo4j knowledge graph, and Streamlit.
