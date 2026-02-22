@@ -1,5 +1,5 @@
 # agents/orchestrator.py
-# LangGraph orchestrator — routes student messages to the right agent
+# Two-stage routing orchestrator
 
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
@@ -18,44 +18,69 @@ class TutorState(TypedDict):
     re_teach_focus:    str
 
 
-CHAT_SYSTEM_PROMPT = """
-You are MOSAIC, a friendly AI tutor specialising in AI engineering and data science.
+# ── Stage 1: Is this a learning request? ──────────────────────────────────────
+STAGE1_PROMPT = """
+You are a message classifier for an AI tutoring system.
 
-You can have casual conversations AND teach technical concepts.
+Answer ONE question: Is the student asking to LEARN or be TESTED on a specific technical concept?
 
-Rules:
-- If the student is just chatting, respond conversationally and naturally
-- If they ask a technical question, answer it clearly but conversationally (not in full lesson format)
-- Keep casual replies short and warm
-- Never force a lesson when someone just wants to chat
-- You can mention that you can teach concepts in depth if they want
+Answer YES if:
+- They want something explained ("explain X", "what is X", "how does X work", "teach me X")
+- They want to be tested or quizzed ("test me on X", "quiz me", "give me a question about X")
+- They are asking a technical question that requires a structured explanation
+
+Answer NO if:
+- It is casual conversation ("hi", "how are you", "thanks", "what do you do")
+- It is a general question about the system ("what can you help with", "who are you")
+- It is a simple yes/no or factual question not requiring a lesson
+- It is feedback or a reaction ("that makes sense", "ok got it", "interesting")
+
+Reply with ONLY one word: YES or NO.
 """
 
-INTENT_SYSTEM_PROMPT = """
-Classify the student's message into exactly one of these intents:
+# ── Stage 2: What is the concept and mode? ───────────────────────────────────
+STAGE2_PROMPT = """
+You are a concept extractor for an AI tutoring system.
 
-chat     — casual conversation, greetings, small talk, non-technical questions
-           ("hi", "how are you", "thanks", "what can you do", "can you chat")
-explain  — asking to learn or understand a technical concept
-           ("explain X", "what is X", "how does X work", "teach me X")
-assess   — asking to be tested or quizzed
-           ("test me", "quiz me", "give me a question", "practice")
+The student wants to learn something. Extract:
+1. The specific technical concept they are asking about
+2. Whether they want to be TAUGHT or TESTED
 
-Reply with ONLY one word: chat, explain, or assess.
+Reply in this exact format (two lines only):
+CONCEPT: <concept name, title case, e.g. "Gradient Descent">
+MODE: <teach or test>
+
+Rules:
+- CONCEPT must be a real technical concept, never "current topic" or vague terms
+- If multiple concepts, pick the main one
+- MODE is "test" only if they explicitly ask to be quizzed or tested
+- MODE is "teach" for everything else
+"""
+
+# ── Chat handler ─────────────────────────────────────────────────────────────
+CHAT_PROMPT = """
+You are MOSAIC, a friendly AI tutor specialising in AI engineering and data science.
+
+Have a natural, warm conversation. Rules:
+- Keep replies concise and friendly
+- If they ask what you can do, briefly explain you can teach AI/ML concepts and test understanding
+- Never launch into a full lesson unprompted
+- If they seem curious about a topic, you can offer to explain it in depth
 """
 
 
 class Orchestrator:
     """
-    LangGraph orchestrator.
+    Two-stage routing orchestrator.
 
-    Routing logic:
-      Casual chat               → Chat handler (friendly response)
-      Student question          → Solver Agent (full lesson)
-      "test me / quiz me"       → Assessment Agent
-      After Assessment          → Feedback Agent
-      Feedback says re_teach    → Solver Agent
-      Feedback says advance     → END
+    Stage 1: Is this a learning request? (YES / NO)
+      NO  → Chat handler
+      YES → Stage 2
+
+    Stage 2: Extract concept + mode (teach / test)
+      teach → Solver Agent
+      test  → Assessment Agent → Feedback Agent
+      Feedback re_teach → Solver Agent
     """
 
     def __init__(self, solver, assessment, feedback, neo4j, letta):
@@ -64,37 +89,45 @@ class Orchestrator:
         self.feedback   = feedback
         self.neo4j      = neo4j
         self.letta      = letta
-        self.llm        = solver.llm   # reuse the same LLM client
+        self.llm        = solver.llm
         self.last_agent_used = None
         self.graph = self._build_graph()
 
     def _build_graph(self):
         workflow = StateGraph(TutorState)
 
-        workflow.add_node("detect_intent", self._detect_intent)
-        workflow.add_node("chat",          self._run_chat)
-        workflow.add_node("solver",        self._run_solver)
-        workflow.add_node("assessment",    self._run_assessment)
-        workflow.add_node("feedback",      self._run_feedback)
+        workflow.add_node("stage1",     self._stage1_classify)
+        workflow.add_node("stage2",     self._stage2_extract)
+        workflow.add_node("chat",       self._run_chat)
+        workflow.add_node("solver",     self._run_solver)
+        workflow.add_node("assessment", self._run_assessment)
+        workflow.add_node("feedback",   self._run_feedback)
 
-        workflow.set_entry_point("detect_intent")
+        workflow.set_entry_point("stage1")
 
+        # Stage 1 → chat or stage2
         workflow.add_conditional_edges(
-            "detect_intent",
-            self._route_by_intent,
-            {"chat": "chat", "explain": "solver", "assess": "assessment"}
+            "stage1",
+            lambda s: "stage2" if s["intent"] == "learn" else "chat",
+            {"chat": "chat", "stage2": "stage2"}
+        )
+
+        # Stage 2 → solver or assessment
+        workflow.add_conditional_edges(
+            "stage2",
+            lambda s: "solver" if s["intent"] == "teach" else "assessment",
+            {"solver": "solver", "assessment": "assessment"}
         )
 
         workflow.add_edge("chat",       END)
+        workflow.add_edge("solver",     END)
         workflow.add_edge("assessment", "feedback")
 
         workflow.add_conditional_edges(
             "feedback",
-            self._route_after_feedback,
-            {"re_teach": "solver", "done": END}
+            lambda s: "solver" if s.get("next_action") == "re_teach" else END,
+            {"solver": "solver", END: END}
         )
-
-        workflow.add_edge("solver", END)
 
         return workflow.compile()
 
@@ -112,64 +145,86 @@ class Orchestrator:
             "re_teach_focus":    ""
         }
         result = self.graph.invoke(state)
-        self.last_agent_used = result.get("agent_used", "unknown")
+        self.last_agent_used = result.get("agent_used", "Solver")
         return result.get("response", "I could not process that request.")
 
-    def _detect_intent(self, state: TutorState) -> TutorState:
-        """Detect intent: keyword-first, LLM fallback."""
+    # ── Stage 1: Learning request or not? ────────────────────────────────────
+    def _stage1_classify(self, state: TutorState) -> TutorState:
+        """Binary: is this a learning request?"""
+        # Fast keyword shortcuts — no LLM needed
         message = state["message"].strip().lower()
 
-        # 1. Hard keyword rules — fast and reliable
-        assess_words = ["test me", "quiz me", "assess me", "give me a question", "practice"]
-        chat_words   = [
-            "hi", "hello", "hey", "how are you", "what do you do", "what can you do",
-            "who are you", "thanks", "thank you", "good morning", "good evening",
-            "what's up", "whats up", "can you chat", "just chatting", "nice",
-            "cool", "okay", "ok", "great", "awesome", "bye", "goodbye",
+        definite_chat = [
+            "hi", "hello", "hey", "how are you", "what do you do",
+            "who are you", "thanks", "thank you", "good morning",
+            "good evening", "bye", "goodbye", "what's up", "whats up",
+            "ok", "okay", "cool", "nice", "great", "awesome",
+            "that makes sense", "got it", "i see", "interesting",
+            "what can you do", "what can you help",
         ]
-        explain_words = [
-            "explain", "what is", "what are", "how does", "how do", "teach me",
-            "tell me about", "describe", "define", "help me understand",
-        ]
+        if any(message == w or message.startswith(w) for w in definite_chat):
+            return {**state, "intent": "chat"}
 
-        if any(w in message for w in assess_words):
-            intent = "assess"
-        elif any(w in message for w in chat_words):
+        definite_learn = [
+            "explain", "what is ", "what are ", "how does", "how do",
+            "teach me", "tell me about", "describe", "define",
+            "help me understand", "test me", "quiz me", "assess me",
+            "give me a question", "i want to learn", "i want to understand",
+        ]
+        if any(w in message for w in definite_learn):
+            return {**state, "intent": "learn"}
+
+        # Ambiguous — ask the LLM
+        try:
+            answer = self.llm.generate(
+                system_prompt=STAGE1_PROMPT,
+                user_message=state["message"]
+            ).strip().upper()
+            intent = "learn" if answer.startswith("YES") else "chat"
+        except Exception:
             intent = "chat"
-        elif any(w in message for w in explain_words):
-            intent = "explain"
-        else:
-            # 2. LLM fallback for ambiguous messages
-            try:
-                intent_raw = self.llm.generate(
-                    system_prompt=INTENT_SYSTEM_PROMPT,
-                    user_message=state["message"]
-                ).strip().lower()
-                # Only accept first word in case LLM adds extra text
-                intent_raw = intent_raw.split()[0] if intent_raw else "chat"
-                intent = intent_raw if intent_raw in ("chat", "explain", "assess") else "chat"
-            except Exception:
-                intent = "chat"  # Default to chat, not explain
 
-        concept = self._extract_concept(state["message"])
-        return {**state, "intent": intent, "concept": concept}
+        return {**state, "intent": intent}
 
-    def _route_by_intent(self, state: TutorState) -> str:
-        return state["intent"]
+    # ── Stage 2: Extract concept + teach vs test ──────────────────────────────
+    def _stage2_extract(self, state: TutorState) -> TutorState:
+        """Extract concept and whether to teach or test."""
+        try:
+            raw = self.llm.generate(
+                system_prompt=STAGE2_PROMPT,
+                user_message=state["message"]
+            ).strip()
 
-    def _route_after_feedback(self, state: TutorState) -> str:
-        return "re_teach" if state.get("next_action") == "re_teach" else "done"
+            concept = "Unknown Concept"
+            mode    = "teach"
 
+            for line in raw.splitlines():
+                line = line.strip()
+                if line.upper().startswith("CONCEPT:"):
+                    concept = line.split(":", 1)[1].strip()
+                elif line.upper().startswith("MODE:"):
+                    mode_raw = line.split(":", 1)[1].strip().lower()
+                    mode = "test" if "test" in mode_raw else "teach"
+
+            # Safety: if concept is vague, use the raw message as fallback
+            if not concept or concept.lower() in ("current topic", "unknown", "unknown concept", ""):
+                concept = state["message"][:60]
+
+        except Exception:
+            concept = state["message"][:60]
+            mode    = "teach"
+
+        return {**state, "concept": concept, "intent": mode}
+
+    # ── Handlers ──────────────────────────────────────────────────────────────
     def _run_chat(self, state: TutorState) -> TutorState:
-        """Handle casual conversation naturally."""
         try:
             response = self.llm.generate(
-                system_prompt=CHAT_SYSTEM_PROMPT,
-                user_message=state["message"],
-                
+                system_prompt=CHAT_PROMPT,
+                user_message=state["message"]
             )
         except Exception as e:
-            response = f"Hey! Something went wrong on my end ({e}). Try again?"
+            response = f"Something went wrong: {e}"
         return {**state, "response": response, "agent_used": "Solver"}
 
     def _run_solver(self, state: TutorState) -> TutorState:
@@ -204,19 +259,3 @@ class Orchestrator:
             "next_action":    fb["next_action"],
             "re_teach_focus": fb.get("re_teach_focus", "")
         }
-
-    def _extract_concept(self, message: str) -> str:
-        """Extract concept name from student message."""
-        concepts = [
-            "backpropagation", "gradient descent", "neural network",
-            "transformer", "attention mechanism", "embeddings",
-            "rag", "fine-tuning", "llm", "pytorch", "tensorflow",
-            "overfitting", "regularization", "batch normalization",
-            "convolutional neural network", "lstm", "bert", "gpt",
-            "chain rule", "calculus", "linear algebra", "probability"
-        ]
-        message_lower = message.lower()
-        for concept in concepts:
-            if concept in message_lower:
-                return concept.title()
-        return "current topic"
