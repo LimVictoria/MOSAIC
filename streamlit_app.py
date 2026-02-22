@@ -589,7 +589,7 @@ with col_left:
             st.caption("No chat history to export yet.")
 
         st.markdown("---")
-        st.markdown('<div class="panel-header">Tools & Danger Zone</div>', unsafe_allow_html=True)
+        st.markdown('<div class="panel-header">Troubleshoot here</div>', unsafe_allow_html=True)
 
         b1, b2, b3 = st.columns(3)
         with b1:
