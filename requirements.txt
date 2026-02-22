@@ -8,7 +8,8 @@ letta-client>=0.1.0
 sentence-transformers==2.7.0
 
 # Vector DB
-chromadb>=0.4.0
+# chromadb>=0.4.0
+pinecone-client
 
 # Knowledge Graph
 neo4j>=5.0.0
