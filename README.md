@@ -14,6 +14,7 @@ Intelligent → LLM-powered reasoning via Groq/llama
 
 Curriculum → The tutoring and learning domain
 
+
 Multi-agent AI tutor for learning Data Science and AI/ML concepts.
 Built with LLaMA 3.3 70B, Letta Cloud memory, RAG (Pinecone + BGE-small), Neo4j knowledge graph, and Streamlit.
 
