@@ -4,6 +4,7 @@
 
 import streamlit as st
 import time
+import random
 from streamlit_agraph import agraph, Node, Edge, Config
 
 st.set_page_config(
@@ -142,7 +143,6 @@ def load_components():
     from memory.letta_client import LettaClient
     from rag.embedder import BGEEmbedder
     from rag.retriever import RAGRetriever
-    from rag.fetch_docs import run_ingestion
     from kg.neo4j_client import Neo4jClient
     from agents.solver_agent import SolverAgent
     from agents.assessment_agent import AssessmentAgent
@@ -152,7 +152,6 @@ def load_components():
     llm          = LLMClient()
     embedder     = BGEEmbedder()
     retriever    = RAGRetriever(embedder)
-    # run_ingestion() 
     neo4j        = Neo4jClient()
     letta        = LettaClient()
     solver       = SolverAgent(llm, retriever, neo4j, letta)
@@ -202,7 +201,8 @@ AGENT_TAGS = {
 # Session state
 # ─────────────────────────────────────────────────────
 for key, val in {
-    "messages": [], "student_id": "student_001",
+    "messages": [],
+    "student_id": f"student_{random.randint(1000, 9999)}",
     "current_concept": None, "current_question": None,
     "kg_data": None, "kg_visible": False, "last_kg_refresh": 0,
     "response_style": "Balanced", "difficulty_override": "Auto",
@@ -365,7 +365,6 @@ st.markdown("---")
 with st.sidebar:
     st.markdown('<div class="panel-header">Knowledge Graph</div>', unsafe_allow_html=True)
 
-    # Refresh KG data periodically
     now = time.time()
     if now - st.session_state.last_kg_refresh > 5:
         kg                               = get_kg_data()
@@ -377,7 +376,6 @@ with st.sidebar:
     st.caption(f"🕸️ {node_count} concepts indexed")
 
     if st.session_state.kg_visible and st.session_state.kg_data:
-        # Compact legend (2 columns to fit sidebar)
         leg_cols = st.columns(2)
         for i, (status, slabel) in enumerate(STATUS_LABELS.items()):
             with leg_cols[i % 2]:
@@ -401,8 +399,6 @@ with st.sidebar:
 
 # ─────────────────────────────────────────────────────
 # MAIN LAYOUT
-# Left  = input, prompts, assessment, progress, settings
-# Right = chat messages + KG subpanel (expander)
 # ─────────────────────────────────────────────────────
 col_left, col_right = st.columns([1, 1.8], gap="large")
 
@@ -544,7 +540,14 @@ with col_left:
     with tab_settings:
         st.markdown('<div class="panel-header">Configuration</div>', unsafe_allow_html=True)
 
-        new_id = st.text_input("Student ID", value=st.session_state.student_id)
+        st.caption(f"Your session ID: `{st.session_state.student_id}`")
+        st.caption("Each session gets a unique ID. Use the same ID on different devices to share progress.")
+        new_id = st.text_input(
+            "Override Student ID",
+            value=st.session_state.student_id,
+            label_visibility="collapsed",
+            placeholder="student_1234"
+        )
         if new_id != st.session_state.student_id:
             st.session_state.student_id = new_id
 
@@ -572,7 +575,7 @@ with col_left:
         if st.session_state.messages:
             lines = []
             for msg in st.session_state.messages:
-                role  = "You" if msg["role"] == "user" else msg.get("agent", "Tutor")
+                role = "You" if msg["role"] == "user" else msg.get("agent", "Tutor")
                 lines.append(f"[{role}]\n{msg['content']}\n")
             chat_text = "\n".join(lines)
             st.download_button(
@@ -585,7 +588,18 @@ with col_left:
         else:
             st.caption("No chat history to export yet.")
 
-        if st.button("🔍 Check RAG Status", use_container_width=True):
+        st.markdown("---")
+        st.markdown('<div class="panel-header">Tools & Danger Zone</div>', unsafe_allow_html=True)
+
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            check_rag  = st.button("🔍 RAG Status",    use_container_width=True)
+        with b2:
+            clear_pine = st.button("🗑 Clear Pinecone", use_container_width=True)
+        with b3:
+            debug_pdf  = st.button("🔬 Debug PDF",      use_container_width=True)
+
+        if check_rag:
             try:
                 retriever = components["retriever"]
                 stats = retriever.index.describe_index_stats()
@@ -594,13 +608,11 @@ with col_left:
                 if namespaces:
                     for ns, data in namespaces.items():
                         st.write(f"- `{ns}`: {data.get('vector_count', 0)} vectors")
-                st.write("**All ingested sources & chunk counts:**")
+                st.write("**Sources & chunk counts:**")
                 dummy = [0.0] * 384
                 results = retriever.index.query(
-                    vector=dummy,
-                    top_k=10000,
-                    namespace="knowledge_base",
-                    include_metadata=True
+                    vector=dummy, top_k=10000,
+                    namespace="knowledge_base", include_metadata=True
                 )
                 from collections import Counter
                 source_counts = Counter(m["metadata"].get("source", "") for m in results["matches"])
@@ -609,9 +621,7 @@ with col_left:
             except Exception as e:
                 st.error(f"RAG check failed: {e}")
 
-        st.markdown("---")
-        st.markdown('<div class="panel-header">Danger Zone</div>', unsafe_allow_html=True)
-        if st.button("🗑 Clear Pinecone", use_container_width=True):
+        if clear_pine:
             try:
                 retriever = components["retriever"]
                 retriever.index.delete(delete_all=True, namespace="knowledge_base")
@@ -619,36 +629,29 @@ with col_left:
             except Exception as e:
                 st.error(f"Clear failed: {e}")
 
-        if st.button("🔬 Debug PDF Extraction", use_container_width=True):
+        if debug_pdf:
             try:
                 from pypdf import PdfReader
-                
                 pdf_path = "docs/FODS Question bank.pdf"
                 reader = PdfReader(pdf_path)
-                
                 st.write(f"**Pages found:** {len(reader.pages)}")
-                
                 total_text = ""
-                for i, page in enumerate(reader.pages):
+                for page in reader.pages:
                     text = page.extract_text()
                     if text:
                         total_text += text
-                        
                 words = total_text.split()
                 st.write(f"**Total words extracted:** {len(words)}")
-                st.write(f"**Expected chunks (400w, 50 overlap):** ~{len(words) // 350}")
-                st.write(f"**First 200 chars:**")
+                st.write(f"**Expected chunks:** ~{len(words) // 350}")
                 st.code(total_text[:200])
-                
             except Exception as e:
                 st.error(f"Debug failed: {e}")
 
 # ══════════════════════════════════════════════════════
-# RIGHT — Chat output + KG subpanel
+# RIGHT — Chat output
 # ══════════════════════════════════════════════════════
 with col_right:
 
-    # ── Conversation output ──
     st.markdown('<div class="panel-header">Conversation</div>', unsafe_allow_html=True)
 
     if not st.session_state.messages:
