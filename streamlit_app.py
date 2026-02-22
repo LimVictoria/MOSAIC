@@ -142,6 +142,7 @@ def load_components():
     from memory.letta_client import LettaClient
     from rag.embedder import BGEEmbedder
     from rag.retriever import RAGRetriever
+    from rag.fetch_docs import run_ingestion
     from kg.neo4j_client import Neo4jClient
     from agents.solver_agent import SolverAgent
     from agents.assessment_agent import AssessmentAgent
@@ -151,6 +152,7 @@ def load_components():
     llm          = LLMClient()
     embedder     = BGEEmbedder()
     retriever    = RAGRetriever(embedder)
+    run_ingestion() 
     neo4j        = Neo4jClient()
     letta        = LettaClient()
     solver       = SolverAgent(llm, retriever, neo4j, letta)
