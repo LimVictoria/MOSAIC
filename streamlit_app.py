@@ -152,7 +152,7 @@ def load_components():
     llm          = LLMClient()
     embedder     = BGEEmbedder()
     retriever    = RAGRetriever(embedder)
-    run_ingestion() 
+    # run_ingestion() 
     neo4j        = Neo4jClient()
     letta        = LettaClient()
     solver       = SolverAgent(llm, retriever, neo4j, letta)
@@ -173,6 +173,11 @@ except Exception as e:
     COMPONENTS_LOADED = False
     LOAD_ERROR        = str(e)
     components        = {}
+
+if COMPONENTS_LOADED:
+    with st.spinner("Checking knowledge base..."):
+        from rag.fetch_docs import run_ingestion
+        run_ingestion()
 
 # ─────────────────────────────────────────────────────
 # Constants
