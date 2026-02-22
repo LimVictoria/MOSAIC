@@ -1,7 +1,10 @@
-# MOSAIC
+# MOSAICurriculum
 
-Multi-agent AI tutor for learning AI engineering concepts.
-Built with LLaMA 3.1 70B, Letta memory, RAG (ChromaDB + BGE-large), Neo4j knowledge graph, and Streamlit.
+**Memory-Orchestrated Symbolic Agent Intelligent Curriculum**
+
+Multi-agent AI tutor for learning Data Science and AI/ML concepts.
+Built with LLaMA 3.3 70B, Letta Cloud memory, RAG (Pinecone + BGE-small), Neo4j knowledge graph, and Streamlit.
+
 Access @ https://mosaicurriculum.streamlit.app/
 
 ---
@@ -9,14 +12,13 @@ Access @ https://mosaicurriculum.streamlit.app/
 ## Project Structure
 
 ```
-ai_tutor/
+mosaic/
 │
-├── streamlit_app.py          ← run this to use the tutor
+├── streamlit_app.py          ← run this to use the tutor (no backend needed)
 │
-├── config.py                 ← all settings (reads from .env)
-├── llm_client.py             ← LLaMA via Ollama or Groq API
+├── config.py                 ← all settings (reads from Streamlit secrets or .env)
+├── llm_client.py             ← LLaMA 3.3 70B via Groq API (Ollama fallback)
 ├── requirements.txt          ← Python dependencies
-├── streamlit_requirements.txt← Streamlit specific
 ├── .env.example              ← copy to .env and fill in keys
 ├── .gitignore
 │
@@ -24,26 +26,23 @@ ai_tutor/
 │   ├── solver_agent.py       ← explains concepts step by step
 │   ├── assessment_agent.py   ← tests understanding, gives score
 │   ├── feedback_agent.py     ← diagnoses right/wrong, decides next step
-│   ├── kg_builder_agent.py   ← builds KG from documents (background)
-│   └── orchestrator.py       ← LangGraph routing between agents
+│   ├── kg_builder_agent.py   ← builds KG from conversations (real-time)
+│   └── orchestrator.py       ← LangGraph chat-first routing between agents
 │
 ├── memory/
-│   └── letta_client.py       ← ONE shared Letta agent per student
+│   └── letta_client.py       ← Letta Cloud persistent memory per student
 │
 ├── rag/
-│   ├── embedder.py           ← BGE-large-en-v1.5
-│   ├── retriever.py          ← ChromaDB queries
-│   └── ingest.py             ← load docs into ChromaDB
+│   ├── embedder.py           ← BAAI/bge-small-en-v1.5 (384 dimensions)
+│   ├── retriever.py          ← Pinecone queries
+│   ├── ingest.py             ← chunks documents and upserts to Pinecone
+│   └── fetch_docs.py         ← scans docs/ folder and incrementally ingests new files
 │
 ├── kg/
-│   └── neo4j_client.py       ← Neo4j + Cytoscape JSON export
+│   └── neo4j_client.py       ← Neo4j AuraDB + Cytoscape JSON export
 │
-├── api/
-│   └── main.py               ← FastAPI backend
-│
-└── scripts/
-    ├── collect_documents.py  ← download free docs + ingest into ChromaDB
-    └── build_kg.py           ← run KG Builder Agent to populate Neo4j
+└── docs/                     ← drop PDF/HTML/TXT/MD files here to add to RAG
+    └── FODS Question bank.pdf
 ```
 
 ---
@@ -53,19 +52,27 @@ ai_tutor/
 ```
 Student message
       ↓
-Orchestrator (LangGraph)
+Orchestrator (LangGraph) — chat-first routing
+      ↓ brief answer + "want to know more?"
+      ↓ (user says yes)
+Solver Agent        — explains using RAG (Pinecone) + KG + Letta memory
       ↓
-Solver Agent        — explains using RAG + KG + Letta memory
+Assessment Agent    — generates question, scores answer 0-100
       ↓
-Assessment Agent    — generates question, scores answer
-      ↓
-Feedback Agent      — diagnoses right/wrong, updates KG colors
+Feedback Agent      — diagnoses right/wrong, updates KG colors, decides next step
       ↓
 Decision: re-teach (→ Solver) or advance (→ next concept)
 ```
 
-All three agents share **one Letta memory agent per student**.
-The LLM inside Letta autonomously decides what to remember.
+All three agents share **one Letta Cloud memory agent per student**, keyed by student ID.
+
+### Orchestrator routing priority
+```
+1. Assessment keywords (test me, quiz me) → redirect to Assessment Tab
+2. Pending concept followup (user said yes) → Solver full lesson
+3. Casual chat keywords (hi, thanks) → friendly chat
+4. LLM classifier → brief answer or chat
+```
 
 ---
 
@@ -80,76 +87,92 @@ cp .env.example .env
 ### Step 2 — Install dependencies
 ```bash
 pip install -r requirements.txt
-pip install -r streamlit_requirements.txt
 ```
 
-### Step 3 — Start Neo4j
-```bash
-docker run --name neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/password \
-  neo4j:latest
+### Step 3 — Set up required services
+
+**Neo4j AuraDB** (free cloud instance)
+- Create at https://neo4j.com/cloud/aura/
+- Copy URI, username, password to secrets
+
+**Letta Cloud** (persistent memory)
+- Sign up at https://app.letta.com
+- Copy API key to secrets
+
+**Groq API** (LLM inference)
+- Sign up at https://console.groq.com
+- Copy API key to secrets — free tier available
+
+**Pinecone** (vector database)
+- Sign up at https://app.pinecone.io
+- Create index named `mosaicurriculum`, dimension `384`, metric `cosine`, region `us-east-1`
+- Copy API key to secrets
+
+### Step 4 — Add documents to RAG
+```
+Drop any PDF, HTML, TXT, or MD files into the docs/ folder.
+The app will automatically ingest them into Pinecone on first startup.
+Topic area is inferred from filename keywords:
+  pandas, numpy, matplotlib → python_data_science
+  stats, probability        → statistics_probability
+  eda, wrangling, cleaning  → data_wrangling_eda
+  anything else             → general
 ```
 
-### Step 4 — Start Letta memory server
+### Step 5 — Run locally (optional)
 ```bash
-pip install letta
-letta server
-# Runs at http://localhost:8283
-```
-
-### Step 5 — Start LLM
-```bash
-# Option A: Local GPU (needs 40GB VRAM)
-ollama pull llama3.1:70b
-ollama serve
-
-# Option B: No GPU — use Groq (free at console.groq.com)
-# Set LLM_PROVIDER=groq and GROQ_API_KEY in .env
-```
-
-### Step 6 — Collect documents and build KG
-```bash
-python scripts/collect_documents.py   # downloads + ingests docs
-python scripts/build_kg.py            # populates Neo4j
-```
-
-### Step 7 — Run the application
-```bash
-# Terminal 1 — backend
-uvicorn api.main:app --reload --port 8000
-
-# Terminal 2 — frontend
 streamlit run streamlit_app.py
 ```
+Only needed if running locally for development. The live app is already deployed at https://mosaicurriculum.streamlit.app/
 
-Open **http://localhost:8501** to start learning.
+---
+
+## Deploying to Streamlit Cloud
+
+Add these secrets in your Streamlit Cloud dashboard:
+
+```toml
+GROQ_API_KEY = "your_groq_key"
+LETTA_API_KEY = "your_letta_key"
+NEO4J_URI = "neo4j+s://xxxxxxxx.databases.neo4j.io"
+NEO4J_USER = "neo4j"
+NEO4J_PASSWORD = "your_password"
+PINECONE_API_KEY = "your_pinecone_key"
+```
+
+On first deploy, the app will automatically download and ingest all files in `docs/` into Pinecone. Subsequent deploys skip already-ingested files instantly.
 
 ---
 
 ## Using the tutor
 
-The Streamlit interface has three tabs:
+The Streamlit interface has three tabs on the left panel:
 
-**Chat tab** — talk to the Solver Agent
+**💬 Chat tab** — talk to the Solver Agent
 ```
 "Explain gradient descent"
-"What is backpropagation?"
-"How do transformers work?"
+"What is a DataFrame?"
+"How does K-Means clustering work?"
 ```
+The tutor gives a brief answer first, then offers a deeper explanation if you want one.
 
-**Assessment tab** — test your understanding
+**📝 Assessment tab** — test your understanding
 ```
-1. Enter a concept name
+1. Enter a concept name (e.g. "pandas DataFrame")
 2. Click "Get Question"
 3. Write your answer
 4. Submit — see score + Feedback Agent diagnosis
 5. Feedback Agent decides: re-teach or advance
 ```
 
-**Settings tab** — system status and agent info
+**⚙️ Settings tab** — configuration and tools
+- Your session ID is auto-generated (`student_XXXX`) — use the same ID on different devices to share progress
+- Response style: Concise / Balanced / Detailed
+- Difficulty override: Auto / Beginner / Intermediate / Advanced
+- Export chat history as `.txt`
+- RAG tools: Check RAG Status, Clear Pinecone, Debug PDF
 
-The **Knowledge Map** (left panel) appears automatically once 2+ concepts are indexed.
+The **Knowledge Graph** (sidebar) appears automatically once 2+ concepts are indexed.
 Node colors update live as you learn:
 
 | Color  | Meaning               |
@@ -163,12 +186,12 @@ Node colors update live as you learn:
 
 ---
 
-## Without a GPU
+## Key design decisions
 
-Set these in your `.env`:
-```
-LLM_PROVIDER=groq
-GROQ_API_KEY=your_key_here
-```
-
-Get a free key at **console.groq.com** — Groq runs LLaMA 3.1 70B very fast on their hardware.
+| Decision | Reason |
+|----------|--------|
+| Pinecone instead of ChromaDB | ChromaDB is local — data wiped on every Streamlit Cloud redeploy. Pinecone is persistent cloud storage |
+| Incremental ingestion | Only new files are processed on startup — safe to redeploy without re-ingesting everything |
+| Chat-first routing | Prevents the tutor from launching into full lessons unprompted — student opts in |
+| Auto student ID | Each session gets a unique ID so multiple students can use the same deployment independently |
+| No FastAPI backend | Streamlit directly calls agents — simpler deployment, no separate backend process needed |
