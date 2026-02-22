@@ -1,139 +1,117 @@
 # rag/fetch_docs.py
-# Downloads free AI/ML textbooks and runs incremental ingestion into Pinecone
-# Run once: python rag/fetch_docs.py
-# Safe to re-run — skips already ingested files
+# Incremental ingestion — scans docs/ folder and ingests any new files
+# No hardcoding — just drop files into docs/ and run
 
-import os
-import requests
 from pathlib import Path
 from rag.embedder import BGEEmbedder
 from rag.retriever import RAGRetriever
 from rag.ingest import DocumentIngester
 
 DOCS_DIR = Path("docs")
-DOCS_DIR.mkdir(exist_ok=True)
 
-# ── Documents to download ────────────────────────────────────────────────────
-# All free and legally available
-DOCUMENTS = [
-    # Python Data Science Handbook — Jake VanderPlas
-    {
-        "url":        "https://jakevdp.github.io/PythonDataScienceHandbook/",
-        "filename":   "python_data_science_handbook.html",
-        "topic_area": "python_data_science",
-        "namespace":  "knowledge_base",
-        "description": "Python Data Science Handbook — NumPy, Pandas, Matplotlib, Scikit-Learn"
-    },
-    # Think Stats — Allen Downey
-    {
-        "url":        "https://greenteapress.com/thinkstats2/html/index.html",
-        "filename":   "think_stats.html",
-        "topic_area": "statistics_probability",
-        "namespace":  "knowledge_base",
-        "description": "Think Stats — Statistics and Probability for Data Science"
-    },
-    # Think Stats Chapter on EDA
-    {
-        "url":        "https://greenteapress.com/thinkstats2/html/thinkstats2002.html",
-        "filename":   "think_stats_eda.html",
-        "topic_area": "data_wrangling_eda",
-        "namespace":  "knowledge_base",
-        "description": "Think Stats — Exploratory Data Analysis chapter"
-    },
-    # Pandas documentation intro
-    {
-        "url":        "https://pandas.pydata.org/docs/user_guide/10min.html",
-        "filename":   "pandas_10min.html",
-        "topic_area": "python_data_science",
-        "namespace":  "knowledge_base",
-        "description": "10 Minutes to Pandas — official Pandas tutorial"
-    },
-    # NumPy quickstart
-    {
-        "url":        "https://numpy.org/doc/stable/user/quickstart.html",
-        "filename":   "numpy_quickstart.html",
-        "topic_area": "python_data_science",
-        "namespace":  "knowledge_base",
-        "description": "NumPy Quickstart Tutorial — official NumPy docs"
-    },
-    # Matplotlib tutorials
-    {
-        "url":        "https://matplotlib.org/stable/tutorials/introductory/usage.html",
-        "filename":   "matplotlib_intro.html",
-        "topic_area": "python_data_science",
-        "namespace":  "knowledge_base",
-        "description": "Matplotlib Usage Guide — official intro tutorial"
-    },
-]
+# Topic area mapping based on filename keywords
+# Add more keywords here as you add new documents
+TOPIC_MAPPING = {
+    "pandas":      "python_data_science",
+    "numpy":       "python_data_science",
+    "matplotlib":  "python_data_science",
+    "python":      "python_data_science",
+    "seaborn":     "python_data_science",
+    "stats":       "statistics_probability",
+    "statistic":   "statistics_probability",
+    "probability": "statistics_probability",
+    "eda":         "data_wrangling_eda",
+    "wrangling":   "data_wrangling_eda",
+    "cleaning":    "data_wrangling_eda",
+    "exploratory": "data_wrangling_eda",
+}
+
+SUPPORTED_FORMATS = [".pdf", ".html", ".htm", ".txt", ".md"]
 
 
-def download_document(url: str, filepath: Path) -> bool:
-    """Download a document from URL and save to filepath."""
-    if filepath.exists():
-        print(f"Already downloaded: {filepath.name}")
-        return True
-    try:
-        print(f"Downloading: {url}")
-        headers = {"User-Agent": "Mozilla/5.0 MOSAICurriculum/1.0"}
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        filepath.write_bytes(response.content)
-        print(f"Saved: {filepath.name} ({len(response.content) // 1024}KB)")
-        return True
-    except Exception as e:
-        print(f"Failed to download {url}: {e}")
-        return False
+def get_topic_area(filename: str) -> str:
+    """
+    Infer topic area from filename keywords.
+    Falls back to 'general' if no keyword matches.
+    """
+    name_lower = filename.lower()
+    for keyword, topic in TOPIC_MAPPING.items():
+        if keyword in name_lower:
+            return topic
+    return "general"
 
 
 def run_ingestion():
-    """Download all documents and incrementally ingest into Pinecone."""
+    """
+    Scan docs/ folder and incrementally ingest any new files into Pinecone.
+    Skips files already ingested. Safe to run on every app startup.
+    """
     print("=" * 60)
-    print("MOSAIC Curriculum — Document Ingestion")
+    print("MOSAIC Curriculum — Incremental Document Ingestion")
     print("=" * 60)
 
+    # Check docs/ folder exists
+    if not DOCS_DIR.exists():
+        print(f"docs/ folder not found — creating it")
+        DOCS_DIR.mkdir(exist_ok=True)
+        print("Add your PDF/HTML/TXT/MD files to docs/ and redeploy")
+        return
+
+    # Find all supported files
+    all_files = [
+        f for f in DOCS_DIR.rglob("*")
+        if f.suffix.lower() in SUPPORTED_FORMATS
+        and f.is_file()
+    ]
+
+    if not all_files:
+        print("No documents found in docs/ folder")
+        print(f"Supported formats: {SUPPORTED_FORMATS}")
+        return
+
+    print(f"Found {len(all_files)} files in docs/")
+
     # Initialise components
-    print("\nInitialising embedder and Pinecone...")
+    print("Initialising embedder and Pinecone...")
     embedder  = BGEEmbedder()
     retriever = RAGRetriever(embedder)
     ingester  = DocumentIngester(retriever, embedder)
 
-    print(f"\nProcessing {len(DOCUMENTS)} documents...")
+    # Check what's already in Pinecone
+    already_ingested = retriever.get_ingested_sources("knowledge_base")
+    new_files = [f for f in all_files if f.name not in already_ingested]
+
+    print(f"Already in Pinecone : {len(already_ingested)} files")
+    print(f"New files to ingest : {len(new_files)} files")
+
+    if not new_files:
+        print("Nothing new to ingest — Pinecone is up to date")
+        return
+
     print("-" * 60)
+    success = 0
+    failed  = 0
 
-    success_count = 0
-    skip_count    = 0
-
-    for doc in DOCUMENTS:
-        filepath = DOCS_DIR / doc["filename"]
-        print(f"\n📄 {doc['description']}")
-
-        # Download if not already saved locally
-        downloaded = download_document(doc["url"], filepath)
-        if not downloaded:
-            print(f"Skipping ingestion — download failed")
-            continue
-
-        # Check if already in Pinecone
-        already = retriever.get_ingested_sources(doc["namespace"])
-        if doc["filename"] in already:
-            print(f"Already in Pinecone — skipping ingestion")
-            skip_count += 1
-            continue
-
-        # Ingest into Pinecone
-        ingester.ingest_file(
-            filepath=str(filepath),
-            topic_area=doc["topic_area"],
-            source=doc["filename"],
-            namespace=doc["namespace"]
-        )
-        success_count += 1
+    for filepath in new_files:
+        topic_area = get_topic_area(filepath.name)
+        print(f"\n📄 {filepath.name} → topic: {topic_area}")
+        try:
+            ingester.ingest_file(
+                filepath=str(filepath),
+                topic_area=topic_area,
+                source=filepath.name,
+                namespace="knowledge_base"
+            )
+            success += 1
+        except Exception as e:
+            print(f"Failed to ingest {filepath.name}: {e}")
+            failed += 1
 
     print("\n" + "=" * 60)
     print(f"Ingestion complete:")
-    print(f"  New documents ingested : {success_count}")
-    print(f"  Already in Pinecone    : {skip_count}")
-    print(f"  Total documents        : {len(DOCUMENTS)}")
+    print(f"  Successfully ingested : {success} files")
+    print(f"  Failed                : {failed} files")
+    print(f"  Already in Pinecone   : {len(already_ingested)} files")
     print("=" * 60)
 
 
