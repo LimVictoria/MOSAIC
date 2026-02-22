@@ -611,6 +611,18 @@ with col_left:
                 st.success("Pinecone cleared — reboot app to re-ingest")
             except Exception as e:
                 st.error(f"Clear failed: {e}")
+        st.write("**Vector count per source:**")
+        dummy = [0.0] * 384
+        results = retriever.index.query(
+            vector=dummy,
+            top_k=10000,
+            namespace="knowledge_base",
+            include_metadata=True
+        )
+        from collections import Counter
+        source_counts = Counter(m["metadata"].get("source", "") for m in results["matches"])
+        for source, count in sorted(source_counts.items()):
+            st.write(f"- `{source}`: {count} chunks")
             
 
 # ══════════════════════════════════════════════════════
