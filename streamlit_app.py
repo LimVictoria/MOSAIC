@@ -588,9 +588,7 @@ with col_left:
                 if namespaces:
                     for ns, data in namespaces.items():
                         st.write(f"- `{ns}`: {data.get('vector_count', 0)} vectors")
-        
-                # Show ALL unique sources
-                st.write("**All ingested sources:**")
+                st.write("**All ingested sources & chunk counts:**")
                 dummy = [0.0] * 384
                 results = retriever.index.query(
                     vector=dummy,
@@ -598,12 +596,15 @@ with col_left:
                     namespace="knowledge_base",
                     include_metadata=True
                 )
-                sources = set(m["metadata"].get("source", "") for m in results["matches"])
-                for s in sorted(sources):
-                    st.write(f"- `{s}`")
-            
+                from collections import Counter
+                source_counts = Counter(m["metadata"].get("source", "") for m in results["matches"])
+                for source, count in sorted(source_counts.items()):
+                    st.write(f"- `{source}`: {count} chunks")
             except Exception as e:
                 st.error(f"RAG check failed: {e}")
+
+        st.markdown("---")
+        st.markdown('<div class="panel-header">Danger Zone</div>', unsafe_allow_html=True)
         if st.button("🗑 Clear Pinecone", use_container_width=True):
             try:
                 retriever = components["retriever"]
@@ -611,19 +612,6 @@ with col_left:
                 st.success("Pinecone cleared — reboot app to re-ingest")
             except Exception as e:
                 st.error(f"Clear failed: {e}")
-        st.write("**Vector count per source:**")
-        dummy = [0.0] * 384
-        results = retriever.index.query(
-            vector=dummy,
-            top_k=10000,
-            namespace="knowledge_base",
-            include_metadata=True
-        )
-        from collections import Counter
-        source_counts = Counter(m["metadata"].get("source", "") for m in results["matches"])
-        for source, count in sorted(source_counts.items()):
-            st.write(f"- `{source}`: {count} chunks")
-            
 
 # ══════════════════════════════════════════════════════
 # RIGHT — Chat output + KG subpanel
