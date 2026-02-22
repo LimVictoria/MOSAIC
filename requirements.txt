@@ -9,7 +9,7 @@ sentence-transformers==2.7.0
 
 # Vector DB
 # chromadb>=0.4.0
-pinecone-client
+pinecone
 
 # Knowledge Graph
 neo4j>=5.0.0
