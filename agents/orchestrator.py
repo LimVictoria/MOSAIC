@@ -116,18 +116,40 @@ class Orchestrator:
         return result.get("response", "I could not process that request.")
 
     def _detect_intent(self, state: TutorState) -> TutorState:
-        """Use LLM to classify intent — chat, explain, or assess."""
-        try:
-            intent_raw = self.llm.generate(
-                system_prompt=INTENT_SYSTEM_PROMPT,
-                user_message=state["message"],
-                temperature=0.0
-            ).strip().lower()
+        """Detect intent: keyword-first, LLM fallback."""
+        message = state["message"].strip().lower()
 
-            # Sanitise — only accept known intents
-            intent = intent_raw if intent_raw in ("chat", "explain", "assess") else "explain"
-        except Exception:
+        # 1. Hard keyword rules — fast and reliable
+        assess_words = ["test me", "quiz me", "assess me", "give me a question", "practice"]
+        chat_words   = [
+            "hi", "hello", "hey", "how are you", "what do you do", "what can you do",
+            "who are you", "thanks", "thank you", "good morning", "good evening",
+            "what's up", "whats up", "can you chat", "just chatting", "nice",
+            "cool", "okay", "ok", "great", "awesome", "bye", "goodbye",
+        ]
+        explain_words = [
+            "explain", "what is", "what are", "how does", "how do", "teach me",
+            "tell me about", "describe", "define", "help me understand",
+        ]
+
+        if any(w in message for w in assess_words):
+            intent = "assess"
+        elif any(w in message for w in chat_words):
+            intent = "chat"
+        elif any(w in message for w in explain_words):
             intent = "explain"
+        else:
+            # 2. LLM fallback for ambiguous messages
+            try:
+                intent_raw = self.llm.generate(
+                    system_prompt=INTENT_SYSTEM_PROMPT,
+                    user_message=state["message"]
+                ).strip().lower()
+                # Only accept first word in case LLM adds extra text
+                intent_raw = intent_raw.split()[0] if intent_raw else "chat"
+                intent = intent_raw if intent_raw in ("chat", "explain", "assess") else "chat"
+            except Exception:
+                intent = "chat"  # Default to chat, not explain
 
         concept = self._extract_concept(state["message"])
         return {**state, "intent": intent, "concept": concept}
@@ -144,7 +166,7 @@ class Orchestrator:
             response = self.llm.generate(
                 system_prompt=CHAT_SYSTEM_PROMPT,
                 user_message=state["message"],
-                temperature=0.7
+                
             )
         except Exception as e:
             response = f"Hey! Something went wrong on my end ({e}). Try again?"
