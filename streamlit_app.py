@@ -592,7 +592,12 @@ with col_right:
             unsafe_allow_html=True)
     else:
         messages = st.session_state.messages
-        for i in range(len(messages) - 1, -1, -2):
-            if i >= 1:
-                render_message(messages[i])    # assistant reply
-                render_message(messages[i-1])  # user prompt above it...
+
+        # Handle unpaired last message (user sent, no reply yet)
+        if len(messages) % 2 == 1:
+            render_message(messages[-1])
+
+        # Render pairs newest first, user above assistant within each pair
+        for i in range(len(messages) - 2, -1, -2):
+            render_message(messages[i])    # user prompt
+            render_message(messages[i+1]) # assistant reply
