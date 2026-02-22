@@ -619,6 +619,30 @@ with col_left:
             except Exception as e:
                 st.error(f"Clear failed: {e}")
 
+        if st.button("🔬 Debug PDF Extraction", use_container_width=True):
+            try:
+                from pypdf import PdfReader
+                
+                pdf_path = "docs/FODS Question bank.pdf"
+                reader = PdfReader(pdf_path)
+                
+                st.write(f"**Pages found:** {len(reader.pages)}")
+                
+                total_text = ""
+                for i, page in enumerate(reader.pages):
+                    text = page.extract_text()
+                    if text:
+                        total_text += text
+                        
+                words = total_text.split()
+                st.write(f"**Total words extracted:** {len(words)}")
+                st.write(f"**Expected chunks (400w, 50 overlap):** ~{len(words) // 350}")
+                st.write(f"**First 200 chars:**")
+                st.code(total_text[:200])
+                
+            except Exception as e:
+                st.error(f"Debug failed: {e}")
+
 # ══════════════════════════════════════════════════════
 # RIGHT — Chat output + KG subpanel
 # ══════════════════════════════════════════════════════
