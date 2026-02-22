@@ -579,6 +579,31 @@ with col_left:
         else:
             st.caption("No chat history to export yet.")
 
+        st.markdown("---")                                    # ← same as else
+        st.markdown('<div class="panel-header">RAG Debug</div>', unsafe_allow_html=True)
+        if st.button("🔍 Check RAG Status", use_container_width=True):
+            try:
+                retriever = components["retriever"]
+                stats = retriever.index.describe_index_stats()
+                namespaces = stats.get("namespaces", {})
+                st.write("**Pinecone Index Stats:**")
+                if namespaces:
+                    for ns, data in namespaces.items():
+                        st.write(f"- `{ns}`: {data.get('vector_count', 0)} vectors")
+                else:
+                    st.warning("No vectors found — ingestion hasn't run yet")
+                st.write("**Sample retrieval test:**")
+                results = retriever.retrieve_for_solver("what is pandas dataframe")
+                if results:
+                    for r in results[:2]:
+                        st.write(f"- Source: `{r['source']}` | Score: `{r['score']:.3f}`")
+                        st.caption(r['text'][:200] + "...")
+                else:
+                    st.warning("No results returned — RAG may be empty")
+            except Exception as e:
+                st.error(f"RAG check failed: {e}")
+            
+
 # ══════════════════════════════════════════════════════
 # RIGHT — Chat output + KG subpanel
 # ══════════════════════════════════════════════════════
