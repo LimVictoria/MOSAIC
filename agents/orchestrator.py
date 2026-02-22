@@ -6,16 +6,43 @@ from typing import TypedDict
 
 
 class TutorState(TypedDict):
-    student_id:     str
-    message:        str
-    intent:         str
-    concept:        str
-    response:       str
-    agent_used:     str
-    question_data:  dict
+    student_id:        str
+    message:           str
+    intent:            str
+    concept:           str
+    response:          str
+    agent_used:        str
+    question_data:     dict
     assessment_result: dict
-    next_action:    str
-    re_teach_focus: str
+    next_action:       str
+    re_teach_focus:    str
+
+
+CHAT_SYSTEM_PROMPT = """
+You are MOSAIC, a friendly AI tutor specialising in AI engineering and data science.
+
+You can have casual conversations AND teach technical concepts.
+
+Rules:
+- If the student is just chatting, respond conversationally and naturally
+- If they ask a technical question, answer it clearly but conversationally (not in full lesson format)
+- Keep casual replies short and warm
+- Never force a lesson when someone just wants to chat
+- You can mention that you can teach concepts in depth if they want
+"""
+
+INTENT_SYSTEM_PROMPT = """
+Classify the student's message into exactly one of these intents:
+
+chat     — casual conversation, greetings, small talk, non-technical questions
+           ("hi", "how are you", "thanks", "what can you do", "can you chat")
+explain  — asking to learn or understand a technical concept
+           ("explain X", "what is X", "how does X work", "teach me X")
+assess   — asking to be tested or quizzed
+           ("test me", "quiz me", "give me a question", "practice")
+
+Reply with ONLY one word: chat, explain, or assess.
+"""
 
 
 class Orchestrator:
@@ -23,9 +50,10 @@ class Orchestrator:
     LangGraph orchestrator.
 
     Routing logic:
-      Student question          → Solver Agent
+      Casual chat               → Chat handler (friendly response)
+      Student question          → Solver Agent (full lesson)
       "test me / quiz me"       → Assessment Agent
-      After Assessment          → Feedback Agent (always)
+      After Assessment          → Feedback Agent
       Feedback says re_teach    → Solver Agent
       Feedback says advance     → END
     """
@@ -36,6 +64,7 @@ class Orchestrator:
         self.feedback   = feedback
         self.neo4j      = neo4j
         self.letta      = letta
+        self.llm        = solver.llm   # reuse the same LLM client
         self.last_agent_used = None
         self.graph = self._build_graph()
 
@@ -43,6 +72,7 @@ class Orchestrator:
         workflow = StateGraph(TutorState)
 
         workflow.add_node("detect_intent", self._detect_intent)
+        workflow.add_node("chat",          self._run_chat)
         workflow.add_node("solver",        self._run_solver)
         workflow.add_node("assessment",    self._run_assessment)
         workflow.add_node("feedback",      self._run_feedback)
@@ -52,9 +82,10 @@ class Orchestrator:
         workflow.add_conditional_edges(
             "detect_intent",
             self._route_by_intent,
-            {"explain": "solver", "assess": "assessment"}
+            {"chat": "chat", "explain": "solver", "assess": "assessment"}
         )
 
+        workflow.add_edge("chat",       END)
         workflow.add_edge("assessment", "feedback")
 
         workflow.add_conditional_edges(
@@ -68,7 +99,6 @@ class Orchestrator:
         return workflow.compile()
 
     def route(self, student_id: str, message: str) -> str:
-        """Main entry point — route message and return response."""
         state = {
             "student_id":        student_id,
             "message":           message,
@@ -86,10 +116,19 @@ class Orchestrator:
         return result.get("response", "I could not process that request.")
 
     def _detect_intent(self, state: TutorState) -> TutorState:
-        message = state["message"].lower()
-        intent  = "assess" if any(
-            w in message for w in ["test", "assess", "quiz", "practice", "question"]
-        ) else "explain"
+        """Use LLM to classify intent — chat, explain, or assess."""
+        try:
+            intent_raw = self.llm.generate(
+                system_prompt=INTENT_SYSTEM_PROMPT,
+                user_message=state["message"],
+                temperature=0.0
+            ).strip().lower()
+
+            # Sanitise — only accept known intents
+            intent = intent_raw if intent_raw in ("chat", "explain", "assess") else "explain"
+        except Exception:
+            intent = "explain"
+
         concept = self._extract_concept(state["message"])
         return {**state, "intent": intent, "concept": concept}
 
@@ -98,6 +137,18 @@ class Orchestrator:
 
     def _route_after_feedback(self, state: TutorState) -> str:
         return "re_teach" if state.get("next_action") == "re_teach" else "done"
+
+    def _run_chat(self, state: TutorState) -> TutorState:
+        """Handle casual conversation naturally."""
+        try:
+            response = self.llm.generate(
+                system_prompt=CHAT_SYSTEM_PROMPT,
+                user_message=state["message"],
+                temperature=0.7
+            )
+        except Exception as e:
+            response = f"Hey! Something went wrong on my end ({e}). Try again?"
+        return {**state, "response": response, "agent_used": "Solver"}
 
     def _run_solver(self, state: TutorState) -> TutorState:
         response = self.solver.explain(
