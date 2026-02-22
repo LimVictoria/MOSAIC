@@ -111,7 +111,6 @@ class Orchestrator:
         workflow.add_node("brief",      self._run_brief_answer)
         workflow.add_node("solver",     self._run_solver)
         workflow.add_node("assessment", self._run_assessment)
-        workflow.add_node("feedback",   self._run_feedback)
 
         workflow.set_entry_point("classify")
 
@@ -129,13 +128,7 @@ class Orchestrator:
         workflow.add_edge("chat",       END)
         workflow.add_edge("brief",      END)
         workflow.add_edge("solver",     END)
-        workflow.add_edge("assessment", "feedback")
-
-        workflow.add_conditional_edges(
-            "feedback",
-            lambda s: "solver" if s.get("next_action") == "re_teach" else END,
-            {"solver": "solver", END: END}
-        )
+        workflow.add_edge("assessment", END)
 
         return workflow.compile()
 
@@ -160,11 +153,16 @@ class Orchestrator:
         message = state["message"].strip().lower()
 
         # 1. Explicit assessment — always takes priority over everything
-        assessment_words = ["test me", "quiz me", "assess me", "give me a question", "practice question"]
+        assessment_words = [
+            "test me", "quiz me", "assess me", "give me a question",
+            "practice question", "test my", "test on", "quiz on",
+            "want to test", "want to be tested", "test my understanding",
+            "test on my", "i want to test", "assess my", "check my understanding",
+            "check my knowledge", "practice on", "want to practice",
+        ]
         if any(w in message for w in assessment_words):
-            concept = self.pending_concept or self._extract_concept(state["message"])
             self.pending_concept = None
-            return {**state, "intent": "assessment", "concept": concept}
+            return {**state, "intent": "assessment"}
 
         # 2. Check if this is a follow-up "yes/no" to a pending concept
         if self.pending_concept:
@@ -259,13 +257,11 @@ class Orchestrator:
         return {**state, "response": response, "agent_used": "Solver"}
 
     def _run_assessment(self, state: TutorState) -> TutorState:
-        q_data   = self.assessment.generate_question(
-            student_id=state["student_id"],
-            concept=state["concept"]
+        response = (
+            "Sure! Head over to the 📝 **Assessment** tab on the left to get tested. "
+            "Type in the concept you want to practice and hit **Get Question →**."
         )
-        response = f"Assessment Question:\n\n{q_data['question']}"
-        return {**state, "response": response, "agent_used": "Assessment",
-                "question_data": q_data}
+        return {**state, "response": response, "agent_used": "Solver"}
 
     def _run_feedback(self, state: TutorState) -> TutorState:
         fb = self.feedback.give_feedback(
