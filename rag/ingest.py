@@ -90,6 +90,7 @@ class DocumentIngester:
             print(f"  Uploaded {total_uploaded}/{len(chunks)} chunks...")
 
         print(f"Done: {source} — {len(chunks)} chunks in namespace '{namespace}'")
+        
     def ingest_text(
         self,
         text: str,
@@ -141,6 +142,7 @@ class DocumentIngester:
             print(f"  Uploaded {total_uploaded}/{len(chunks)} chunks...")
 
         print(f"Done: {source} — {len(chunks)} chunks in namespace '{namespace}'")
+        
     def ingest_directory(
         self,
         directory: str,
