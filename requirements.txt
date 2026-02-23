@@ -34,5 +34,6 @@ tqdm>=4.66.0
 
 # Evaluation
 ragas
-langchain-groq
+# langchain-groq
 datasets
+langchain-google-genai
