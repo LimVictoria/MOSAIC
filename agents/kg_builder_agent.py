@@ -1,79 +1,48 @@
 # agents/kg_builder_agent.py
-# Builds the Knowledge Graph from RAG documents
-# Background job — runs once at setup, again when new docs are added
+# Maps student interactions to existing curriculum KG nodes
+# Updates Topic/Technique status based on what student is engaging with
+# Does NOT create new nodes — curriculum is fixed in Neo4j
 
-import json
 from llm_client import LLMClient
 from kg.neo4j_client import Neo4jClient
 from rag.retriever import RAGRetriever
 
-KG_EXTRACTION_SYSTEM_PROMPT = """
-You are a knowledge graph builder specialized in AI and data science education.
+TOPIC_MAPPING_PROMPT = """
+You are a curriculum mapping assistant.
 
-Your ONLY job is to read technical documents and extract structured knowledge.
+Given a student's question or concept, identify which topic from the curriculum it belongs to.
 
-Extract:
-1. Key concepts as nodes
-2. Relationships between concepts as directed edges
-3. Prerequisites (what must be known BEFORE learning this concept)
-4. Difficulty level of each concept
-5. Topic area each concept belongs to
+Curriculum topics:
+- Python for Data Science
+- Reading Structured Files
+- Structured Data Types
+- Exploratory Data Analysis
+- Data Visualization
+- Imputation Techniques
+- Data Augmentation
+- Feature Reduction
+- Business Metrics
+- Preprocessing Summary
+- ML Frameworks
 
-Relationship types:
-- REQUIRES:    concept A requires knowing concept B first
-- BUILDS_ON:   concept A extends or builds on concept B
-- PART_OF:     concept A is a component of concept B
-- USED_IN:     concept A is applied when doing concept B
-- RELATED_TO:  concept A and B are related but neither requires the other
-
-Difficulty levels: beginner / intermediate / advanced
-
-Topic areas:
-  python_fundamentals, mathematics, classical_ml, deep_learning,
-  nlp, computer_vision, mlops, llm_engineering, data_engineering
-
-CRITICAL: Return ONLY valid JSON. No explanation, no preamble, no markdown.
-"""
-
-KG_EXTRACTION_USER_PROMPT = """
-Read this document and extract the knowledge graph components.
-
-DOCUMENT:
-{document_text}
-
-Return ONLY this JSON:
-{{
-  "concepts": [
-    {{
-      "name": "Backpropagation",
-      "description": "Algorithm for computing gradients in neural networks",
-      "difficulty": "intermediate",
-      "topic_area": "deep_learning"
-    }}
-  ],
-  "relationships": [
-    {{
-      "from": "Backpropagation",
-      "to": "Chain Rule",
-      "type": "REQUIRES"
-    }}
-  ]
-}}
+Return ONLY the exact topic name from the list above that best matches.
+If none match, return "Python for Data Science" as the default.
+Return ONLY the topic name — no explanation, no punctuation.
 """
 
 
 class KGBuilderAgent:
     """
-    KG Builder Agent.
+    KG Builder Agent — updated for curriculum KG.
 
-    Reads all document chunks from ChromaDB RAG knowledge base,
-    extracts concepts and relationships using LLaMA,
-    writes everything to Neo4j.
+    NO longer creates new nodes. The curriculum is fixed in Neo4j.
 
-    Does NOT use Letta memory — it is a background data pipeline, not a tutor.
-    Does NOT run in real time — runs once at setup or when new docs are added.
+    Instead:
+    - Maps student questions to existing Topic nodes
+    - Updates status on matched Topic nodes
+    - Keeps the KG clean and structured
 
-    Once Neo4j has > 1 node, the KG visual appears automatically in Streamlit.
+    Called by Solver Agent after every explanation.
     """
 
     def __init__(
@@ -86,100 +55,65 @@ class KGBuilderAgent:
         self.neo4j    = neo4j_client
         self.retriever = retriever
 
-    def build_kg_from_all_documents(self):
+    def map_and_update(self, concept: str, status: str = "blue") -> str | None:
         """
-        Main entry point.
-        Reads all chunks from ChromaDB and populates Neo4j.
+        Map a free-text concept to the nearest curriculum Topic node
+        and update its status.
+
+        Called by Solver Agent after every explanation.
+
+        Returns the matched topic name, or None if no match found.
         """
-        print("KG Builder Agent starting...")
+        # First try direct match in Neo4j
+        matched = self.neo4j.map_concept_to_topic(concept)
 
-        all_docs  = self.retriever.knowledge_collection.get(
-            include=["documents", "metadatas"]
-        )
-        documents = all_docs["documents"]
-        metadatas = all_docs["metadatas"]
+        # If no direct match, use LLM to map to nearest topic
+        if not matched:
+            matched = self._llm_map_to_topic(concept)
 
-        print(f"Processing {len(documents)} document chunks...")
-
-        total_concepts      = 0
-        total_relationships = 0
-
-        for i, (doc, meta) in enumerate(zip(documents, metadatas)):
-            source = meta.get("source", "unknown")
-            print(f"  [{i+1}/{len(documents)}] {source}")
-
-            extraction = self._extract_from_document(doc)
-            if extraction:
-                counts               = self._write_to_neo4j(extraction)
-                total_concepts      += counts["concepts"]
-                total_relationships += counts["relationships"]
-
-            node_count = self.neo4j.get_node_count()
-            if node_count > 1:
-                print(f"  KG now visible: {node_count} nodes indexed")
-
-        print(f"\nKG Build complete.")
-        print(f"  Total concept nodes:  {total_concepts}")
-        print(f"  Total relationships:  {total_relationships}")
-        print(f"  Final Neo4j count:    {self.neo4j.get_node_count()}")
-
-    def update_kg_with_new_documents(self, new_doc_ids: list[str]):
-        """Called when new documents are added to ChromaDB."""
-        print(f"Updating KG with {len(new_doc_ids)} new documents...")
-        docs = self.retriever.knowledge_collection.get(
-            ids=new_doc_ids,
-            include=["documents", "metadatas"]
-        )
-        for doc, meta in zip(docs["documents"], docs["metadatas"]):
-            extraction = self._extract_from_document(doc)
-            if extraction:
-                self._write_to_neo4j(extraction)
-        print("KG update complete.")
-
-    def _extract_from_document(self, document_text: str) -> dict | None:
-        """Use LLaMA to extract concepts and relationships from a document chunk."""
-        prompt = KG_EXTRACTION_USER_PROMPT.format(
-            document_text=document_text[:3000]
-        )
-        response = self.llm.generate(
-            system_prompt=KG_EXTRACTION_SYSTEM_PROMPT,
-            user_message=prompt,
-            temperature=0.1
-        )
-        try:
-            clean = response.strip()
-            if clean.startswith("```"):
-                clean = clean.split("```")[1]
-                if clean.startswith("json"):
-                    clean = clean[4:]
-            return json.loads(clean)
-        except json.JSONDecodeError as e:
-            print(f"  JSON parse error: {e}")
+        if matched:
+            self.neo4j.update_node_status(matched, status)
+            print(f"KG Builder: '{concept}' mapped to '{matched}' → status={status}")
+            return matched
+        else:
+            print(f"KG Builder: Could not map '{concept}' to any curriculum topic")
             return None
 
-    def _write_to_neo4j(self, extraction: dict) -> dict:
-        """Write extracted concepts and relationships to Neo4j."""
-        concepts_written      = 0
-        relationships_written = 0
+    def _llm_map_to_topic(self, concept: str) -> str | None:
+        """
+        Use LLM to map a concept to the nearest curriculum topic.
+        Falls back to this when direct Neo4j string matching fails.
+        """
+        try:
+            response = self.llm.generate(
+                system_prompt=TOPIC_MAPPING_PROMPT,
+                user_message=f"Map this to a curriculum topic: {concept}",
+                temperature=0.0
+            )
+            matched = response.strip().strip(".")
+            # Verify the returned topic actually exists in Neo4j
+            verified = self.neo4j.map_concept_to_topic(matched)
+            return verified if verified else None
+        except Exception as e:
+            print(f"KG Builder LLM mapping error: {e}")
+            return None
 
-        for concept in extraction.get("concepts", []):
-            if concept.get("name"):
-                self.neo4j.create_concept_node({
-                    "name":        concept["name"],
-                    "description": concept.get("description", ""),
-                    "difficulty":  concept.get("difficulty", "intermediate"),
-                    "topic_area":  concept.get("topic_area", "general"),
-                    "status":      "grey"
-                })
-                concepts_written += 1
-
-        for rel in extraction.get("relationships", []):
-            if rel.get("from") and rel.get("to") and rel.get("type"):
-                self.neo4j.create_relationship(
-                    from_concept=rel["from"],
-                    to_concept=rel["to"],
-                    rel_type=rel["type"]
-                )
-                relationships_written += 1
-
-        return {"concepts": concepts_written, "relationships": relationships_written}
+    def update_technique_if_matched(self, concept: str, status: str = "blue") -> str | None:
+        """
+        Try to match concept to a Technique node specifically.
+        Used for detailed technique-level tracking.
+        """
+        cypher = """
+        MATCH (t:Technique)
+        WHERE toLower(t.name) CONTAINS toLower($name)
+           OR toLower($name) CONTAINS toLower(t.name)
+        RETURN t.name as name
+        LIMIT 1
+        """
+        results = self.neo4j.query(cypher, {"name": concept})
+        if results:
+            technique_name = results[0]["name"]
+            self.neo4j.update_technique_status(technique_name, status)
+            print(f"KG Builder: '{concept}' matched technique '{technique_name}' → status={status}")
+            return technique_name
+        return None
