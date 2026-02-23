@@ -108,12 +108,21 @@ def run_ingestion():
         topic_area = get_topic_area(filepath.name)
         print(f"\n📄 {filepath.name} → topic: {topic_area}")
         try:
-            ingester.ingest_file(
-                filepath=str(filepath),
-                topic_area=topic_area,
-                source=filepath.name,
-                namespace="knowledge_base"
-            )
+            if filepath.suffix.lower() == ".ipynb":
+                text = extract_text_from_ipynb(str(filepath))
+                ingester.ingest_text(
+                    text=text,
+                    topic_area=topic_area,
+                    source=filepath.name,
+                    namespace="knowledge_base"
+                )
+            else:
+                ingester.ingest_file(
+                    filepath=str(filepath),
+                    topic_area=topic_area,
+                    source=filepath.name,
+                    namespace="knowledge_base"
+                )
             success += 1
         except Exception as e:
             print(f"Failed to ingest {filepath.name}: {e}")
