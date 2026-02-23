@@ -722,6 +722,17 @@ with col_left:
                         if not answer:
                             answer = "No answer generated"
                     except Exception as ex:
+                        ex_str = str(ex)
+                        if "429" in ex_str or "rate_limit" in ex_str.lower() or "tokens per day" in ex_str.lower():
+                            progress_bar.empty()
+                            status_text.empty()
+                            # Extract wait time from error message if available
+                            import re
+                            wait_match = re.search(r'try again in ([\d]+m[\d.]+s)', ex_str)
+                            wait_time  = wait_match.group(1) if wait_match else "a few hours"
+                            st.error(f"⚠️ Groq daily token limit reached (100,000 tokens/day). Please try again in **{wait_time}**.")
+                            st.info("💡 Tip: Run fewer questions (e.g. 5) to use fewer tokens per evaluation.")
+                            st.stop()
                         answer = f"Error: {ex}"
 
                     # Get contexts from Pinecone
@@ -834,7 +845,17 @@ Context Recall: 0.X"""
                         context_recall_scores.append(cr_score)
 
                     except Exception as ex:
-                        # On error append NaN
+                        ex_str = str(ex)
+                        if "429" in ex_str or "rate_limit" in ex_str.lower() or "tokens per day" in ex_str.lower():
+                            score_bar.empty()
+                            score_status.empty()
+                            import re
+                            wait_match = re.search(r'try again in ([\d]+m[\d.]+s)', ex_str)
+                            wait_time  = wait_match.group(1) if wait_match else "a few hours"
+                            st.error(f"⚠️ Groq daily token limit reached (100,000 tokens/day). Please try again in **{wait_time}**.")
+                            st.info("💡 Tip: Run fewer questions (e.g. 5) to use fewer tokens per evaluation.")
+                            st.stop()
+                        # Non-rate-limit error — append NaN and continue
                         faithfulness_scores.append(float("nan"))
                         answer_relevancy_scores.append(float("nan"))
                         context_precision_scores.append(float("nan"))
