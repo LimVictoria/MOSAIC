@@ -118,7 +118,11 @@ class LettaClient:
     def get_mastered_concepts(self, student_id: str) -> list[str]:
         try:
             records = self.search_archival_memory(student_id, "mastered concept assessment passed")
-            mastered = [r.get("concept", "") for r in records if r.get("type") == "feedback_given" and r.get("passed")]
+            mastered = [
+                r.get("topic") or r.get("concept", "")
+                for r in records
+                if r.get("type") == "feedback_given" and r.get("passed")
+                ]
             core = self.read_core_memory(student_id)
             core_mastered = core.get("mastered_concepts", [])
             return list(set([c for c in mastered + core_mastered if c]))
