@@ -703,20 +703,16 @@ with col_right:
 
         if st.button("▶ Run RAGAs Evaluation", use_container_width=True):
             try:
-                import json
                 import traceback
-                from pathlib import Path
 
-                # ── Load test dataset ──
-                dataset_path = Path("evaluation/results/test_dataset.json")
-                if not dataset_path.exists():
-                    st.error("Test dataset not found at evaluation/results/test_dataset.json — run evaluation/test_dataset.py first.")
-                    st.stop()
+                # ── Load questions from evaluation/test_dataset.py ──
+                import sys
+                sys.path.append(".")
+                from evaluation.test_dataset import DATASET as ALL_QUESTIONS
 
-                with open(dataset_path, "r") as f:
-                    all_questions = json.load(f)
 
                 # Apply unit filter
+                all_questions = ALL_QUESTIONS
                 if unit_filter != "All Units":
                     all_questions = [q for q in all_questions if q["unit"] == unit_filter]
 
