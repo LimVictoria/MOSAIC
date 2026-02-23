@@ -742,6 +742,19 @@ with col_left:
 
                 status_text.empty()
 
+                # ── Debug — show first 3 answers so we can verify they are not empty ──
+                with st.expander("🔍 Debug — Sample answers (first 3)", expanded=True):
+                    for i in range(min(3, len(eval_questions))):
+                        st.markdown(f"**Q:** {eval_questions[i]}")
+                        st.markdown(f"**A:** {eval_answers[i][:300] if eval_answers[i] else '⚠️ EMPTY'}")
+                        st.markdown(f"**Contexts:** {len(eval_contexts[i])} chunks retrieved")
+                        st.markdown("---")
+
+                # Stop here if all answers are empty
+                if all(not a or a == "No answer generated" for a in eval_answers):
+                    st.error("All answers are empty — orchestrator is not returning responses. Check solver agent.")
+                    st.stop()
+
                 # ── Build RAGAs dataset ──
                 from datasets import Dataset as HFDataset
                 ragas_data = HFDataset.from_dict({
