@@ -159,7 +159,7 @@ def load_components():
     feedback     = FeedbackAgent(llm, retriever, neo4j, letta)
     orchestrator = Orchestrator(solver, assessment, feedback, neo4j, letta)
     return {
-        "llm": llm, "embedder": embedder, "retriever": retriever, "neo4j": neo4j, "letta": letta,
+        "llm": llm, "retriever": retriever, "neo4j": neo4j, "letta": letta,
         "solver": solver, "assessment": assessment,
         "feedback": feedback, "orchestrator": orchestrator,
     }
@@ -647,30 +647,6 @@ with col_left:
             except Exception as e:
                 st.error(f"Debug failed: {e}")
 
-# ══════════════════════════════════════════════════════
-# RIGHT — Chat output
-# ══════════════════════════════════════════════════════
-with col_right:
-
-    st.markdown('<div class="panel-header">Conversation</div>', unsafe_allow_html=True)
-
-    if not st.session_state.messages:
-        st.markdown(
-            '<div style="padding:2rem 0;color:#94A3B8;font-size:0.78rem;text-align:center">'
-            'Ask a question to get started.</div>',
-            unsafe_allow_html=True)
-    else:
-        messages = st.session_state.messages
-
-        # Handle unpaired last message (user sent, no reply yet)
-        if len(messages) % 2 == 1:
-            render_message(messages[-1])
-
-        # Render pairs newest first, user above assistant within each pair
-        for i in range(len(messages) - 2, -1, -2):
-            render_message(messages[i])    # user prompt
-            render_message(messages[i+1]) # assistant reply
-
     # ── EVALUATION ──
     with tab_eval:
         st.markdown('<div class="panel-header">RAGAs Evaluation</div>', unsafe_allow_html=True)
@@ -810,13 +786,31 @@ with col_right:
                 bge_embedder   = components["embedder"]
                 ragas_embedder = LangchainEmbeddingsWrapper(BGELangchainWrapper(bge_embedder))
 
-                st.info("Running RAGAs scoring with Groq as judge and BGE as embedder...")
-                results = evaluate(
-                    ragas_data,
-                    metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
-                    llm=ragas_llm,
-                    embeddings=ragas_embedder
-                )
+                st.info("Running RAGAs scoring — this takes 2-5 mins for 10 questions...")
+                metric_status = st.empty()
+
+                # Run one metric at a time so user sees progress
+                all_results = {}
+                metric_list = [
+                    ("Faithfulness",      faithfulness),
+                    ("Answer Relevancy",  answer_relevancy),
+                    ("Context Precision", context_precision),
+                    ("Context Recall",    context_recall),
+                ]
+                for metric_name, metric_fn in metric_list:
+                    metric_status.caption(f"Scoring {metric_name}...")
+                    r = evaluate(
+                        ragas_data,
+                        metrics=[metric_fn],
+                        llm=ragas_llm,
+                        embeddings=ragas_embedder
+                    )
+                    all_results[metric_name] = r
+
+                metric_status.empty()
+
+                # Merge results — use last result as base, update scores
+                results = all_results["Context Recall"]
 
                 # ══════════════════════════════════════════════════
                 # OVERALL SCORES
@@ -825,10 +819,10 @@ with col_right:
                 st.markdown('<div class="panel-header">Overall Scores</div>', unsafe_allow_html=True)
 
                 scores = {
-                    "Faithfulness":      round(float(results["faithfulness"]), 3),
-                    "Answer Relevancy":  round(float(results["answer_relevancy"]), 3),
-                    "Context Precision": round(float(results["context_precision"]), 3),
-                    "Context Recall":    round(float(results["context_recall"]), 3),
+                    "Faithfulness":      round(float(all_results["Faithfulness"]["faithfulness"]), 3),
+                    "Answer Relevancy":  round(float(all_results["Answer Relevancy"]["answer_relevancy"]), 3),
+                    "Context Precision": round(float(all_results["Context Precision"]["context_precision"]), 3),
+                    "Context Recall":    round(float(all_results["Context Recall"]["context_recall"]), 3),
                 }
                 avg_score = round(sum(scores.values()) / len(scores), 3)
 
@@ -872,14 +866,12 @@ with col_right:
                 st.markdown('<div class="panel-header">Per Question Breakdown</div>', unsafe_allow_html=True)
 
                 import pandas as pd
-                df_results = results.to_pandas()
-
                 df_display = pd.DataFrame({
                     "Question":      eval_questions,
-                    "Faithfulness":  df_results["faithfulness"].round(3),
-                    "Ans Relevancy": df_results["answer_relevancy"].round(3),
-                    "Ctx Precision": df_results["context_precision"].round(3),
-                    "Ctx Recall":    df_results["context_recall"].round(3),
+                    "Faithfulness":  all_results["Faithfulness"].to_pandas()["faithfulness"].round(3),
+                    "Ans Relevancy": all_results["Answer Relevancy"].to_pandas()["answer_relevancy"].round(3),
+                    "Ctx Precision": all_results["Context Precision"].to_pandas()["context_precision"].round(3),
+                    "Ctx Recall":    all_results["Context Recall"].to_pandas()["context_recall"].round(3),
                     "Model Answer":  eval_answers,
                     "Ground Truth":  eval_ground_truth,
                 })
@@ -935,3 +927,27 @@ with col_right:
                 st.error(f"Evaluation failed: {e}")
                 st.code(traceback.format_exc())
 
+
+# ══════════════════════════════════════════════════════
+# RIGHT — Chat output
+# ══════════════════════════════════════════════════════
+with col_right:
+
+    st.markdown('<div class="panel-header">Conversation</div>', unsafe_allow_html=True)
+
+    if not st.session_state.messages:
+        st.markdown(
+            '<div style="padding:2rem 0;color:#94A3B8;font-size:0.78rem;text-align:center">'
+            'Ask a question to get started.</div>',
+            unsafe_allow_html=True)
+    else:
+        messages = st.session_state.messages
+
+        # Handle unpaired last message (user sent, no reply yet)
+        if len(messages) % 2 == 1:
+            render_message(messages[-1])
+
+        # Render pairs newest first, user above assistant within each pair
+        for i in range(len(messages) - 2, -1, -2):
+            render_message(messages[i])    # user prompt
+            render_message(messages[i+1]) # assistant reply
