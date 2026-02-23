@@ -33,7 +33,4 @@ python-dotenv>=1.0.0
 tqdm>=4.66.0
 
 # Evaluation
-ragas
-# langchain-groq
-datasets
-langchain-google-genai
+groq
