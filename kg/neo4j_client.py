@@ -1,5 +1,6 @@
 # kg/neo4j_client.py
 # Neo4j connection and core operations
+# Updated to use Topic and Technique nodes from curriculum KG
 
 from neo4j import GraphDatabase
 from config import KG_VISIBLE_THRESHOLD, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
@@ -7,9 +8,17 @@ from config import KG_VISIBLE_THRESHOLD, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 class Neo4jClient:
     """
     Core Neo4j client.
-    Used by KG Builder Agent to write nodes/edges.
-    Used by all 3 teaching agents to query relationships.
-    Used by API to export Cytoscape JSON for frontend.
+    Works with curriculum KG — Topic and Technique nodes.
+    Topic nodes   = high-level subjects (e.g. Exploratory Data Analysis)
+    Technique nodes = specific skills under each topic (e.g. Pearson Correlation)
+
+    Status values (set per student interaction):
+      grey   = not yet reached
+      blue   = currently studying
+      yellow = being assessed
+      green  = mastered
+      red    = needs review (failed 3+ times)
+      orange = prerequisite gap
     """
 
     def __init__(self):
@@ -45,124 +54,232 @@ class Neo4jClient:
             print(f"Query error: {e}")
             return []
 
-    # ── KG Builder writes ──────────────────────────
+    # ── Status updates ─────────────────────────────
 
-    def create_concept_node(self, concept: dict):
-        """Create or update a concept node. Called by KG Builder Agent."""
+    def update_topic_status(self, topic_name: str, status: str):
+        """
+        Update status on a Topic node.
+        Called by Solver (blue), Assessment (yellow), Feedback (green/red/orange).
+        """
         cypher = """
-        MERGE (c:Concept {name: $name})
-        SET c.description = $description,
-            c.difficulty = $difficulty,
-            c.topic_area = $topic_area,
-            c.status = $status
-        RETURN c
+        MATCH (t:Topic {name: $name})
+        SET t.status = $status
+        RETURN t
         """
-        self.query(cypher, {
-            "name": concept["name"],
-            "description": concept.get("description", ""),
-            "difficulty": concept.get("difficulty", "intermediate"),
-            "topic_area": concept.get("topic_area", "general"),
-            "status": concept.get("status", "grey")
-        })
+        self.query(cypher, {"name": topic_name, "status": status})
 
-    def create_relationship(self, from_concept: str, to_concept: str, rel_type: str):
+    def update_technique_status(self, technique_name: str, status: str):
         """
-        Create a relationship between two concepts.
-        rel_type: REQUIRES | BUILDS_ON | PART_OF | USED_IN | RELATED_TO
+        Update status on a Technique node.
+        Called by Feedback Agent after detailed assessment.
         """
-        cypher = f"""
-        MATCH (a:Concept {{name: $from_name}})
-        MATCH (b:Concept {{name: $to_name}})
-        MERGE (a)-[:{rel_type}]->(b)
-        """
-        self.query(cypher, {"from_name": from_concept, "to_name": to_concept})
-
-    # ── Teaching agent reads ───────────────────────
-
-    def get_prerequisites(self, concept_name: str) -> list[str]:
-        """Used by Solver Agent before explaining — checks what student needs to know first."""
         cypher = """
-        MATCH (c:Concept {name: $name})-[:REQUIRES*1..3]->(prereq:Concept)
-        RETURN prereq.name as name, prereq.difficulty as difficulty
-        ORDER BY prereq.difficulty
+        MATCH (t:Technique {name: $name})
+        SET t.status = $status
+        RETURN t
         """
-        results = self.query(cypher, {"name": concept_name})
+        self.query(cypher, {"name": technique_name, "status": status})
+
+    def update_node_status(self, name: str, status: str):
+        """
+        Update status on either Topic or Technique — tries Topic first, then Technique.
+        Used by agents that don't distinguish between node types.
+        """
+        cypher = """
+        MATCH (n)
+        WHERE (n:Topic OR n:Technique) AND n.name = $name
+        SET n.status = $status
+        RETURN n
+        """
+        self.query(cypher, {"name": name, "status": status})
+
+    # ── Prerequisite checks ────────────────────────
+
+    def get_prerequisites(self, topic_name: str) -> list[str]:
+        """
+        Get prerequisite Topics for a given Topic.
+        Used by Solver Agent before explaining — checks what student needs first.
+        Traverses up to 3 levels deep.
+        """
+        cypher = """
+        MATCH (t:Topic {name: $name})-[:PREREQUISITE*1..3]->(pre:Topic)
+        RETURN pre.name as name, pre.status as status
+        ORDER BY pre.name
+        """
+        results = self.query(cypher, {"name": topic_name})
         return [r["name"] for r in results]
 
-    def get_related_concepts(self, concept_name: str) -> list[str]:
-        """Used by Assessment Agent to generate comprehensive questions."""
-        cypher = """
-        MATCH (c:Concept {name: $name})-[r]-(related:Concept)
-        WHERE type(r) IN ['RELATED_TO', 'BUILDS_ON', 'USED_IN']
-        RETURN related.name as name
-        LIMIT 5
+    def get_unmastered_prerequisites(self, topic_name: str) -> list[str]:
         """
-        results = self.query(cypher, {"name": concept_name})
+        Get prerequisites that are NOT yet mastered (status != green).
+        Used to enforce prerequisite gating.
+        """
+        cypher = """
+        MATCH (t:Topic {name: $name})-[:PREREQUISITE*1..3]->(pre:Topic)
+        WHERE coalesce(pre.status, 'grey') <> 'green'
+        RETURN pre.name as name, coalesce(pre.status, 'grey') as status
+        ORDER BY pre.name
+        """
+        results = self.query(cypher, {"name": topic_name})
         return [r["name"] for r in results]
 
-    def get_prerequisite_chain_for_feedback(self, concept_name: str) -> list[dict]:
-        """Used by Feedback Agent to trace root cause of mistakes."""
+    def get_prerequisite_chain_for_feedback(self, topic_name: str) -> list[dict]:
+        """
+        Full prerequisite chain with status — used by Feedback Agent
+        to trace root cause of mistakes.
+        """
         cypher = """
-        MATCH path = (c:Concept {name: $name})-[:REQUIRES*]->(prereq:Concept)
-        RETURN prereq.name as name,
-               prereq.difficulty as difficulty,
-               prereq.status as status,
+        MATCH path = (t:Topic {name: $name})-[:PREREQUISITE*]->(pre:Topic)
+        RETURN pre.name as name,
+               coalesce(pre.status, 'grey') as status,
                length(path) as depth
         ORDER BY depth
         """
-        return self.query(cypher, {"name": concept_name})
+        return self.query(cypher, {"name": topic_name})
 
-    def get_learning_path(self, target_concept: str) -> list[str]:
-        """Get ordered learning path to reach a target concept."""
+    # ── Curriculum structure reads ─────────────────
+
+    def get_curriculum_structure(self) -> list[dict]:
+        """
+        Returns full curriculum — all Topics with their prerequisites.
+        Passed to LLM system prompt so it knows the learning sequence.
+        """
         cypher = """
-        MATCH path = (start:Concept)-[:REQUIRES*]->(target:Concept {name: $name})
-        WHERE NOT (start)-[:REQUIRES]->()
+        MATCH (t:Topic)
+        OPTIONAL MATCH (t)-[:PREREQUISITE]->(pre:Topic)
+        RETURN t.name as topic,
+               coalesce(t.status, 'grey') as status,
+               collect(pre.name) as prerequisites
+        ORDER BY t.name
+        """
+        return self.query(cypher)
+
+    def get_topic_techniques(self, topic_name: str) -> list[dict]:
+        """
+        Get all Techniques under a Topic with their status.
+        Used by Assessment Agent to ask technique-specific questions.
+        """
+        cypher = """
+        MATCH (t:Topic {name: $name})-[]->(tech:Technique)
+        RETURN tech.name as name,
+               coalesce(tech.status, 'grey') as status
+        ORDER BY tech.name
+        """
+        return self.query(cypher, {"name": topic_name})
+
+    def get_related_topics(self, topic_name: str) -> list[str]:
+        """
+        Get Topics related to a given Topic via any relationship.
+        Used by Assessment Agent to generate comprehensive questions.
+        """
+        cypher = """
+        MATCH (t:Topic {name: $name})-[r]-(related:Topic)
+        RETURN related.name as name
+        LIMIT 5
+        """
+        results = self.query(cypher, {"name": topic_name})
+        return [r["name"] for r in results]
+
+    def get_learning_path(self, target_topic: str) -> list[str]:
+        """
+        Get ordered learning path to reach a target Topic.
+        Returns sequence from root to target.
+        """
+        cypher = """
+        MATCH path = (start:Topic)-[:PREREQUISITE*]->(target:Topic {name: $name})
+        WHERE NOT (start)<-[:PREREQUISITE]-()
         RETURN [node in nodes(path) | node.name] as path
         ORDER BY length(path) DESC
         LIMIT 1
         """
-        results = self.query(cypher, {"name": target_concept})
-        if results:
+        results = self.query(cypher, {"name": target_topic})
+        if results and results[0]["path"]:
             return results[0]["path"]
-        return [target_concept]
+        return [target_topic]
 
-    # ── Feedback Agent writes ──────────────────────
-
-    def update_node_status(self, concept_name: str, status: str):
+    def get_next_recommended_topic(self) -> str:
         """
-        Update visual status of a node. Called by Feedback Agent after assessment.
-
-        status:
-          grey   = not yet reached
-          blue   = currently studying
-          yellow = being assessed
-          green  = mastered
-          red    = weak area
-          orange = prerequisite gap
+        Returns the next Topic the student should study.
+        Finds Topics whose prerequisites are all mastered but
+        the topic itself is not yet mastered.
         """
         cypher = """
-        MATCH (c:Concept {name: $name})
-        SET c.status = $status
-        RETURN c
+        MATCH (t:Topic)
+        WHERE coalesce(t.status, 'grey') <> 'green'
+        AND NOT EXISTS {
+            MATCH (t)-[:PREREQUISITE]->(pre:Topic)
+            WHERE coalesce(pre.status, 'grey') <> 'green'
+        }
+        RETURN t.name as name
+        ORDER BY t.name
+        LIMIT 1
         """
-        self.query(cypher, {"name": concept_name, "status": status})
+        results = self.query(cypher)
+        if results:
+            return results[0]["name"]
+        return "Python for Data Science"
+
+    def map_concept_to_topic(self, concept_name: str) -> str:
+        """
+        Maps a free-text concept from student conversation to nearest Topic node.
+        Used by KG Builder to avoid creating random nodes.
+        Returns matched topic name or None.
+        """
+        cypher = """
+        MATCH (t:Topic)
+        WHERE toLower(t.name) CONTAINS toLower($name)
+           OR toLower($name) CONTAINS toLower(t.name)
+        RETURN t.name as name
+        LIMIT 1
+        """
+        results = self.query(cypher, {"name": concept_name})
+        if results:
+            return results[0]["name"]
+
+        # Also check Techniques
+        cypher2 = """
+        MATCH (tech:Technique)
+        WHERE toLower(tech.name) CONTAINS toLower($name)
+           OR toLower($name) CONTAINS toLower(tech.name)
+        RETURN tech.name as name
+        LIMIT 1
+        """
+        results2 = self.query(cypher2, {"name": concept_name})
+        if results2:
+            return results2[0]["name"]
+
+        return None
 
     # ── KG visibility ──────────────────────────────
 
     def get_node_count(self) -> int:
-        result = self.query("MATCH (n:Concept) RETURN count(n) as count")
+        """Returns total number of Topic + Technique nodes."""
+        result = self.query("""
+            MATCH (n) WHERE n:Topic OR n:Technique
+            RETURN count(n) as count
+        """)
         return result[0]["count"] if result else 0
 
     def is_kg_visible(self) -> bool:
-        """Returns True when KG has more than 1 node — triggers frontend display."""
         return self.get_node_count() > KG_VISIBLE_THRESHOLD
+
+    def get_mastered_concepts(self, student_id: str = None) -> list[str]:
+        """
+        Returns list of mastered Topic names (status = green).
+        student_id kept for API compatibility but status is stored on node directly.
+        """
+        results = self.query("""
+            MATCH (t:Topic {status: 'green'})
+            RETURN t.name as name
+        """)
+        return [r["name"] for r in results]
 
     # ── Frontend export ────────────────────────────
 
     def to_cytoscape_json(self) -> dict:
         """
-        Convert entire Neo4j graph to Cytoscape.js format.
-        Called by /api/kg/graph endpoint for Streamlit frontend.
+        Convert curriculum KG to Cytoscape.js format for Streamlit frontend.
+        Shows Topic nodes as large circles, Technique nodes as smaller ones.
         """
         status_colors = {
             "grey":   "#9CA3AF",
@@ -173,34 +290,58 @@ class Neo4jClient:
             "orange": "#F97316",
         }
 
-        nodes_result = self.query("""
-            MATCH (n:Concept)
-            RETURN n.name as name,
-                   n.description as description,
-                   n.difficulty as difficulty,
-                   n.topic_area as topic_area,
-                   n.status as status
+        # Fetch Topic nodes
+        topics = self.query("""
+            MATCH (t:Topic)
+            RETURN t.name as name,
+                   coalesce(t.status, 'grey') as status,
+                   'topic' as node_type
         """)
 
+        # Fetch Technique nodes
+        techniques = self.query("""
+            MATCH (t:Technique)
+            RETURN t.name as name,
+                   coalesce(t.status, 'grey') as status,
+                   'technique' as node_type
+        """)
+
+        # Fetch all relationships
         edges_result = self.query("""
-            MATCH (a:Concept)-[r]->(b:Concept)
+            MATCH (a)-[r]->(b)
+            WHERE (a:Topic OR a:Technique) AND (b:Topic OR b:Technique)
             RETURN a.name as source,
                    b.name as target,
                    type(r) as relationship
         """)
 
         cytoscape_nodes = []
-        for node in nodes_result:
+
+        # Topic nodes — larger size
+        for node in topics:
             status = node.get("status", "grey")
             cytoscape_nodes.append({
                 "data": {
-                    "id": node["name"].lower().replace(" ", "_"),
-                    "label": node["name"],
-                    "description": node.get("description", ""),
-                    "difficulty": node.get("difficulty", "intermediate"),
-                    "topic_area": node.get("topic_area", "general"),
-                    "status": status,
-                    "color": status_colors.get(status, "#9CA3AF")
+                    "id":        node["name"].lower().replace(" ", "_"),
+                    "label":     node["name"],
+                    "status":    status,
+                    "color":     status_colors.get(status, "#9CA3AF"),
+                    "node_type": "topic",
+                    "difficulty": "intermediate"
+                }
+            })
+
+        # Technique nodes — smaller size
+        for node in techniques:
+            status = node.get("status", "grey")
+            cytoscape_nodes.append({
+                "data": {
+                    "id":        node["name"].lower().replace(" ", "_"),
+                    "label":     node["name"],
+                    "status":    status,
+                    "color":     status_colors.get(status, "#9CA3AF"),
+                    "node_type": "technique",
+                    "difficulty": "beginner"
                 }
             })
 
@@ -208,11 +349,11 @@ class Neo4jClient:
         for i, edge in enumerate(edges_result):
             cytoscape_edges.append({
                 "data": {
-                    "id": f"e{i}",
-                    "source": edge["source"].lower().replace(" ", "_"),
-                    "target": edge["target"].lower().replace(" ", "_"),
+                    "id":           f"e{i}",
+                    "source":       edge["source"].lower().replace(" ", "_"),
+                    "target":       edge["target"].lower().replace(" ", "_"),
                     "relationship": edge["relationship"],
-                    "label": edge["relationship"].replace("_", " ").lower()
+                    "label":        edge["relationship"].replace("_", " ").lower()
                 }
             })
 
