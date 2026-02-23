@@ -818,11 +818,18 @@ with col_left:
                 st.markdown("---")
                 st.markdown('<div class="panel-header">Overall Scores</div>', unsafe_allow_html=True)
 
+                import numpy as np
+                def extract_score(result, key):
+                    val = result[key]
+                    if isinstance(val, list):
+                        return round(float(np.nanmean([v for v in val if v is not None])), 3)
+                    return round(float(val), 3)
+
                 scores = {
-                    "Faithfulness":      round(float(all_results["Faithfulness"]["faithfulness"]), 3),
-                    "Answer Relevancy":  round(float(all_results["Answer Relevancy"]["answer_relevancy"]), 3),
-                    "Context Precision": round(float(all_results["Context Precision"]["context_precision"]), 3),
-                    "Context Recall":    round(float(all_results["Context Recall"]["context_recall"]), 3),
+                    "Faithfulness":      extract_score(all_results["Faithfulness"],      "faithfulness"),
+                    "Answer Relevancy":  extract_score(all_results["Answer Relevancy"],  "answer_relevancy"),
+                    "Context Precision": extract_score(all_results["Context Precision"], "context_precision"),
+                    "Context Recall":    extract_score(all_results["Context Recall"],    "context_recall"),
                 }
                 avg_score = round(sum(scores.values()) / len(scores), 3)
 
