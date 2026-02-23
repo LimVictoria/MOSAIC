@@ -761,15 +761,15 @@ with col_left:
                     context_recall,
                 )
                 from ragas.llms import LangchainLLMWrapper
-                from langchain_groq import ChatGroq
+                from langchain_google_genai import ChatGoogleGenerativeAI
 
-                groq_api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
-                groq_llm     = ChatGroq(
-                    model="llama-3.3-70b-versatile",
-                    api_key=groq_api_key,
+                gemini_api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
+                gemini_llm     = ChatGoogleGenerativeAI(
+                    model="gemini-1.5-flash",
+                    google_api_key=gemini_api_key,
                     temperature=0
                 )
-                ragas_llm = LangchainLLMWrapper(groq_llm)
+                ragas_llm = LangchainLLMWrapper(gemini_llm)
 
                 # Use BGE embedder already in the project — avoids OpenAI dependency
                 from ragas.embeddings import BaseRagasEmbeddings
