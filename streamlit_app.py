@@ -714,16 +714,18 @@ with col_left:
                     q = item["question"]
                     status_text.caption(f"Processing: {q[:60]}...")
 
-                    # Get answer from Solver Agent
+                    # Get answer using orchestrator — same method as Chat tab
                     try:
-                        solver_result = solver.explain(
+                        orch          = components["orchestrator"]
+                        route_result  = orch.route(
                             student_id=st.session_state.student_id,
-                            concept=q,
-                            message=q
+                            message=f"Explain {q}"
                         )
-                        answer = solver_result if isinstance(solver_result, str) else solver_result.get("response", "")
-                    except Exception:
-                        answer = ""
+                        answer = route_result if isinstance(route_result, str) else route_result.get("response", "")
+                        if not answer:
+                            answer = "No answer generated"
+                    except Exception as ex:
+                        answer = f"Error: {ex}"
 
                     # Get contexts from Pinecone
                     try:
