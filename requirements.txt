@@ -31,3 +31,8 @@ streamlit-agraph>=0.0.45
 # Utilities
 python-dotenv>=1.0.0
 tqdm>=4.66.0
+
+# Evaluation
+ragas
+langchain-groq
+datasets
