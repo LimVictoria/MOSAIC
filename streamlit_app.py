@@ -677,15 +677,13 @@ with col_left:
             label_visibility="collapsed"
         )
 
-        if st.button("▶ Run RAGAs Evaluation", use_container_width=True):
+        if st.button("▶ Run Evaluation", use_container_width=True):
             try:
                 import traceback
-
-                # ── Load questions from evaluation/test_dataset.py ──
+                import json
                 import sys
                 sys.path.append(".")
                 from evaluation.test_dataset import DATASET as ALL_QUESTIONS
-
 
                 # Apply unit filter
                 all_questions = ALL_QUESTIONS
@@ -698,9 +696,8 @@ with col_left:
 
                 questions_sample = all_questions[:n_questions]
                 retriever        = components["retriever"]
-                solver           = components["solver"]
 
-                # ── Query Solver + Pinecone for each question ──
+                # ── Step 1: Query Solver + Pinecone ──
                 st.info(f"Querying Solver and Pinecone for {len(questions_sample)} questions...")
                 progress_bar = st.progress(0)
                 status_text  = st.empty()
@@ -712,12 +709,12 @@ with col_left:
 
                 for idx, item in enumerate(questions_sample):
                     q = item["question"]
-                    status_text.caption(f"Processing: {q[:60]}...")
+                    status_text.caption(f"[{idx+1}/{len(questions_sample)}] {q[:60]}...")
 
-                    # Get answer using orchestrator — same method as Chat tab
+                    # Get answer from orchestrator
                     try:
-                        orch          = components["orchestrator"]
-                        route_result  = orch.route(
+                        orch         = components["orchestrator"]
+                        route_result = orch.route(
                             student_id=st.session_state.student_id,
                             message=f"Explain {q}"
                         )
@@ -742,109 +739,129 @@ with col_left:
 
                 status_text.empty()
 
-                # ── Debug — show first 3 answers so we can verify they are not empty ──
-                with st.expander("🔍 Debug — Sample answers (first 3)", expanded=True):
+                # ── Debug expander ──
+                with st.expander("🔍 Debug — Sample answers (first 3)", expanded=False):
                     for i in range(min(3, len(eval_questions))):
                         st.markdown(f"**Q:** {eval_questions[i]}")
                         st.markdown(f"**A:** {eval_answers[i][:300] if eval_answers[i] else '⚠️ EMPTY'}")
                         st.markdown(f"**Contexts:** {len(eval_contexts[i])} chunks retrieved")
                         st.markdown("---")
 
-                # Stop here if all answers are empty
                 if all(not a or a == "No answer generated" for a in eval_answers):
-                    st.error("All answers are empty — orchestrator is not returning responses. Check solver agent.")
+                    st.error("All answers are empty — orchestrator is not returning responses.")
                     st.stop()
 
-                # ── Build RAGAs dataset ──
-                from datasets import Dataset as HFDataset
-                ragas_data = HFDataset.from_dict({
-                    "question":    eval_questions,
-                    "answer":      eval_answers,
-                    "contexts":    eval_contexts,
-                    "ground_truth": eval_ground_truth,
-                })
-
-                # ── Set up Groq as judge ──
+                # ── Step 2: Score each question with Groq (n=1, one call per question) ──
                 import os
-                from ragas import evaluate
-                from ragas.metrics import (
-                    faithfulness,
-                    answer_relevancy,
-                    context_precision,
-                    context_recall,
-                )
-                from ragas.llms import LangchainLLMWrapper
-                from langchain_google_genai import ChatGoogleGenerativeAI
+                from groq import Groq
 
-                gemini_api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
-                gemini_llm     = ChatGoogleGenerativeAI(
-                    model="gemini-1.5-flash",
-                    google_api_key=gemini_api_key,
-                    temperature=0
-                )
-                ragas_llm = LangchainLLMWrapper(gemini_llm)
+                groq_api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
+                groq_client  = Groq(api_key=groq_api_key)
 
-                # Use BGE embedder already in the project — avoids OpenAI dependency
-                from ragas.embeddings import BaseRagasEmbeddings
-                from langchain_core.embeddings import Embeddings as LCEmbeddings
+                st.info("Scoring with Groq judge — 1 call per question...")
+                score_bar    = st.progress(0)
+                score_status = st.empty()
 
-                class BGELangchainWrapper(LCEmbeddings):
-                    """Wraps our existing BGEEmbedder for RAGAs compatibility."""
-                    def __init__(self, bge_embedder):
-                        self._embedder = bge_embedder
-                    def embed_documents(self, texts):
-                        return self._embedder.embed_documents(texts)
-                    def embed_query(self, text):
-                        return self._embedder.embed_query(text)
+                faithfulness_scores      = []
+                answer_relevancy_scores  = []
+                context_precision_scores = []
+                context_recall_scores    = []
 
-                from ragas.embeddings import LangchainEmbeddingsWrapper
-                bge_embedder   = components["embedder"]
-                ragas_embedder = LangchainEmbeddingsWrapper(BGELangchainWrapper(bge_embedder))
+                SCORE_PROMPT = """You are an expert evaluator for RAG (Retrieval Augmented Generation) systems.
+Score the following on a scale of 0.0 to 1.0.
 
-                st.info("Running RAGAs scoring — this takes 2-5 mins for 10 questions...")
-                metric_status = st.empty()
+Question: {question}
+Answer: {answer}
+Retrieved Context: {context}
+Ground Truth: {ground_truth}
 
-                # Run one metric at a time so user sees progress
-                all_results = {}
-                metric_list = [
-                    ("Faithfulness",      faithfulness),
-                    ("Answer Relevancy",  answer_relevancy),
-                    ("Context Precision", context_precision),
-                    ("Context Recall",    context_recall),
-                ]
-                for metric_name, metric_fn in metric_list:
-                    metric_status.caption(f"Scoring {metric_name}...")
-                    r = evaluate(
-                        ragas_data,
-                        metrics=[metric_fn],
-                        llm=ragas_llm,
-                        embeddings=ragas_embedder
-                    )
-                    all_results[metric_name] = r
+Score these 4 metrics:
+1. Faithfulness (0-1): Is the answer grounded in the retrieved context? Does it avoid hallucination?
+2. Answer Relevancy (0-1): Does the answer actually address the question asked?
+3. Context Precision (0-1): Is the retrieved context relevant to the question?
+4. Context Recall (0-1): Does the retrieved context contain enough information to answer the question correctly?
 
-                metric_status.empty()
+Reply ONLY with 4 numbers on separate lines in this exact format:
+Faithfulness: 0.X
+Answer Relevancy: 0.X
+Context Precision: 0.X
+Context Recall: 0.X"""
 
-                # Merge results — use last result as base, update scores
-                results = all_results["Context Recall"]
+                for idx, (q, a, ctx, gt) in enumerate(zip(eval_questions, eval_answers, eval_contexts, eval_ground_truth)):
+                    score_status.caption(f"Scoring [{idx+1}/{len(eval_questions)}] {q[:50]}...")
+
+                    context_text = " ".join(ctx)[:1500]
+
+                    try:
+                        response = groq_client.chat.completions.create(
+                            model="llama-3.3-70b-versatile",
+                            messages=[{
+                                "role": "user",
+                                "content": SCORE_PROMPT.format(
+                                    question=q,
+                                    answer=a[:500],
+                                    context=context_text,
+                                    ground_truth=gt
+                                )
+                            }],
+                            temperature=0,
+                            max_tokens=100,
+                            n=1
+                        )
+
+                        raw = response.choices[0].message.content.strip()
+
+                        # Parse the 4 scores
+                        f_score  = 0.0
+                        ar_score = 0.0
+                        cp_score = 0.0
+                        cr_score = 0.0
+
+                        for line in raw.split("\n"):
+                            line = line.strip()
+                            if line.startswith("Faithfulness:"):
+                                f_score  = float(line.split(":")[1].strip())
+                            elif line.startswith("Answer Relevancy:"):
+                                ar_score = float(line.split(":")[1].strip())
+                            elif line.startswith("Context Precision:"):
+                                cp_score = float(line.split(":")[1].strip())
+                            elif line.startswith("Context Recall:"):
+                                cr_score = float(line.split(":")[1].strip())
+
+                        faithfulness_scores.append(f_score)
+                        answer_relevancy_scores.append(ar_score)
+                        context_precision_scores.append(cp_score)
+                        context_recall_scores.append(cr_score)
+
+                    except Exception as ex:
+                        # On error append NaN
+                        faithfulness_scores.append(float("nan"))
+                        answer_relevancy_scores.append(float("nan"))
+                        context_precision_scores.append(float("nan"))
+                        context_recall_scores.append(float("nan"))
+
+                    score_bar.progress((idx + 1) / len(eval_questions))
+
+                score_status.empty()
 
                 # ══════════════════════════════════════════════════
                 # OVERALL SCORES
                 # ══════════════════════════════════════════════════
+                import numpy as np
+                import pandas as pd
+
+                def safe_mean(lst):
+                    vals = [v for v in lst if not (v != v)]  # filter NaN
+                    return round(float(np.mean(vals)), 3) if vals else 0.0
+
                 st.markdown("---")
                 st.markdown('<div class="panel-header">Overall Scores</div>', unsafe_allow_html=True)
 
-                import numpy as np
-                def extract_score(result, key):
-                    val = result[key]
-                    if isinstance(val, list):
-                        return round(float(np.nanmean([v for v in val if v is not None])), 3)
-                    return round(float(val), 3)
-
                 scores = {
-                    "Faithfulness":      extract_score(all_results["Faithfulness"],      "faithfulness"),
-                    "Answer Relevancy":  extract_score(all_results["Answer Relevancy"],  "answer_relevancy"),
-                    "Context Precision": extract_score(all_results["Context Precision"], "context_precision"),
-                    "Context Recall":    extract_score(all_results["Context Recall"],    "context_recall"),
+                    "Faithfulness":      safe_mean(faithfulness_scores),
+                    "Answer Relevancy":  safe_mean(answer_relevancy_scores),
+                    "Context Precision": safe_mean(context_precision_scores),
+                    "Context Recall":    safe_mean(context_recall_scores),
                 }
                 avg_score = round(sum(scores.values()) / len(scores), 3)
 
@@ -872,7 +889,6 @@ with col_left:
                     unsafe_allow_html=True
                 )
 
-                # ── Score guide ──
                 st.markdown("""
                 <div style="font-size:0.65rem;color:#94A3B8;margin-top:0.5rem;text-align:center">
                 <span style="color:#059669">≥ 0.7 Good</span> &nbsp;·&nbsp;
@@ -887,13 +903,12 @@ with col_left:
                 st.markdown("---")
                 st.markdown('<div class="panel-header">Per Question Breakdown</div>', unsafe_allow_html=True)
 
-                import pandas as pd
                 df_display = pd.DataFrame({
                     "Question":      eval_questions,
-                    "Faithfulness":  all_results["Faithfulness"].to_pandas()["faithfulness"].round(3),
-                    "Ans Relevancy": all_results["Answer Relevancy"].to_pandas()["answer_relevancy"].round(3),
-                    "Ctx Precision": all_results["Context Precision"].to_pandas()["context_precision"].round(3),
-                    "Ctx Recall":    all_results["Context Recall"].to_pandas()["context_recall"].round(3),
+                    "Faithfulness":  [round(s, 3) for s in faithfulness_scores],
+                    "Ans Relevancy": [round(s, 3) for s in answer_relevancy_scores],
+                    "Ctx Precision": [round(s, 3) for s in context_precision_scores],
+                    "Ctx Recall":    [round(s, 3) for s in context_recall_scores],
                     "Model Answer":  eval_answers,
                     "Ground Truth":  eval_ground_truth,
                 })
@@ -937,14 +952,11 @@ with col_left:
                 st.download_button(
                     label="⬇ Download full results as .csv",
                     data=csv,
-                    file_name="mosaic_ragas_results.csv",
+                    file_name="mosaic_evaluation_results.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
 
-            except ImportError as e:
-                st.error(f"Missing package: {e}")
-                st.caption("Add these to requirements.txt: ragas, langchain-groq, datasets")
             except Exception as e:
                 st.error(f"Evaluation failed: {e}")
                 st.code(traceback.format_exc())
