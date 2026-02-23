@@ -303,26 +303,41 @@ def render_kg(kg_data: dict, height: int = 380):
     edges_data = elements.get("edges", [])
 
     if len(nodes_data) <= 1:
-        st.caption("⏳ Ask a question to start building the graph...")
+        st.caption("⏳ Loading curriculum graph...")
         return
 
     nodes = []
     for n in nodes_data:
-        d      = n["data"]
-        status = d.get("status", "grey")
-        size   = {"beginner": 14, "intermediate": 18, "advanced": 22}.get(
-                 d.get("difficulty", "intermediate"), 18)
+        d         = n["data"]
+        status    = d.get("status", "grey")
+        node_type = d.get("node_type", "topic")
+
+        # Topic nodes are larger, Technique nodes are smaller
+        size = 22 if node_type == "topic" else 12
+
+        # Topic nodes show full label, Technique nodes truncate
+        label = d["label"] if node_type == "topic" else (d["label"][:15] + "..." if len(d["label"]) > 15 else d["label"])
+
         nodes.append(Node(
-            id=d["id"], label=d["label"], size=size,
+            id=d["id"], label=label, size=size,
             color=STATUS_COLORS.get(status, "#9CA3AF"),
-            title=f"{d['label']} · {STATUS_LABELS.get(status, status)} · {d.get('difficulty','')}",
-            font={"color": "#1E293B", "size": 11, "face": "JetBrains Mono"}
+            title=f"{d['label']} · {STATUS_LABELS.get(status, status)} · {node_type}",
+            font={"color": "#1E293B", "size": 10 if node_type == "technique" else 12, "face": "JetBrains Mono"}
         ))
 
     edge_colors = {
-        "REQUIRES": "#EF4444", "BUILDS_ON": "#3B82F6",
-        "PART_OF": "#10B981", "USED_IN": "#F59E0B", "RELATED_TO": "#94A3B8",
+        "PREREQUISITE": "#EF4444",
+        "COVERS":       "#3B82F6",
+        "INCLUDES":     "#10B981",
+        "USES":         "#F59E0B",
+        "METHOD":       "#8B5CF6",
+        "MEASURES":     "#06B6D4",
+        "LEADS_TO":     "#F97316",
+        "COMPARED_TO":  "#94A3B8",
+        "REQUIRES":     "#EF4444",
+        "RELATED_TO":   "#94A3B8",
     }
+
     edges = [
         Edge(
             source=e["data"]["source"], target=e["data"]["target"],
@@ -336,7 +351,7 @@ def render_kg(kg_data: dict, height: int = 380):
         width="100%", height=height, directed=True, physics=True,
         hierarchical=False, nodeHighlightBehavior=True,
         highlightColor="#059669",
-        d3={"gravity": -250, "linkLength": 110}
+        d3={"gravity": -300, "linkLength": 130}
     ))
 
 # ─────────────────────────────────────────────────────
@@ -373,9 +388,9 @@ with st.sidebar:
         st.session_state.last_kg_refresh = now
 
     node_count = st.session_state.kg_data.get("node_count", 0) if st.session_state.kg_data else 0
-    st.caption(f"🕸️ {node_count} concepts indexed")
+    st.caption(f"🕸️ {node_count} curriculum nodes")
 
-    if st.session_state.kg_visible and st.session_state.kg_data:
+    if st.session_state.kg_data and st.session_state.kg_data.get("node_count", 0) > 0:
         leg_cols = st.columns(2)
         for i, (status, slabel) in enumerate(STATUS_LABELS.items()):
             with leg_cols[i % 2]:
@@ -393,6 +408,7 @@ with st.sidebar:
         <div style="text-align:center;padding:2rem 1rem;color:#94A3B8">
             <div style="font-size:1.8rem">🕸️</div>
             <div style="font-size:0.72rem;margin-top:0.5rem">
+            Curriculum graph loading...
                 Graph appears after 2+ concepts are indexed
             </div>
         </div>""", unsafe_allow_html=True)
