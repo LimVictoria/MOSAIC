@@ -1,7 +1,7 @@
 # rag/fetch_docs.py
 # Incremental ingestion — scans docs/ folder and ingests any new files
 # No hardcoding — just drop files into docs/ and run
-
+import json
 from pathlib import Path
 from rag.embedder import BGEEmbedder
 from rag.retriever import RAGRetriever
@@ -26,7 +26,19 @@ TOPIC_MAPPING = {
     "exploratory": "data_wrangling_eda",
 }
 
-SUPPORTED_FORMATS = [".pdf", ".html", ".htm", ".txt", ".md"]
+SUPPORTED_FORMATS = [".pdf", ".html", ".htm", ".txt", ".md", ".ipynb"]
+
+def extract_text_from_ipynb(filepath: str) -> str:
+    """Extract text and code from Jupyter notebook cells."""
+    with open(filepath, "r", encoding="utf-8") as f:
+        notebook = json.load(f)
+    text = ""
+    for cell in notebook["cells"]:
+        if cell["cell_type"] == "markdown":
+            text += "".join(cell["source"]) + "\n\n"
+        elif cell["cell_type"] == "code":
+            text += "```python\n" + "".join(cell["source"]) + "\n```\n\n"
+    return text
 
 
 def get_topic_area(filename: str) -> str:
