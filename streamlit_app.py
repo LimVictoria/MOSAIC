@@ -159,7 +159,7 @@ def load_components():
     feedback     = FeedbackAgent(llm, retriever, neo4j, letta)
     orchestrator = Orchestrator(solver, assessment, feedback, neo4j, letta)
     return {
-        "llm": llm, "retriever": retriever, "neo4j": neo4j, "letta": letta,
+        "llm": llm, "embedder": embedder, "retriever": retriever, "neo4j": neo4j, "letta": letta,
         "solver": solver, "assessment": assessment,
         "feedback": feedback, "orchestrator": orchestrator,
     }
