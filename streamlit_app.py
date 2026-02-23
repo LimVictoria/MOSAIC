@@ -406,7 +406,7 @@ col_left, col_right = st.columns([1, 1.8], gap="large")
 # LEFT — Input & Controls
 # ══════════════════════════════════════════════════════
 with col_left:
-    tab_chat, tab_assess, tab_settings = st.tabs(["💬 Chat", "📝 Assessment", "⚙️ Settings"])
+    tab_chat, tab_assess, tab_settings, tab_eval = st.tabs(["💬 Chat", "📝 Assessment", "⚙️ Settings", "🧪 Evaluation"])
 
     # ── CHAT ──
     with tab_chat:
@@ -589,7 +589,7 @@ with col_left:
             st.caption("No chat history to export yet.")
 
         st.markdown("---")
-        st.markdown('<div class="panel-header">Troubleshoot here</div>', unsafe_allow_html=True)
+        st.markdown('<div class="panel-header">Tools & Danger Zone</div>', unsafe_allow_html=True)
 
         b1, b2, b3 = st.columns(3)
         with b1:
@@ -670,3 +670,254 @@ with col_right:
         for i in range(len(messages) - 2, -1, -2):
             render_message(messages[i])    # user prompt
             render_message(messages[i+1]) # assistant reply
+
+    # ── EVALUATION ──
+    with tab_eval:
+        st.markdown('<div class="panel-header">RAGAs Evaluation</div>', unsafe_allow_html=True)
+        st.caption("Evaluates RAG pipeline quality using 4 RAGAs metrics. Uses Groq as judge — no extra cost.")
+
+        st.markdown("---")
+        st.markdown('<div class="panel-header">Metrics explained</div>', unsafe_allow_html=True)
+        st.markdown("""
+        <div style="font-size:0.72rem;color:#475569;line-height:2">
+        <b>Faithfulness</b> — does the answer stay grounded in retrieved chunks?<br>
+        <b>Answer Relevancy</b> — does the answer actually address the question asked?<br>
+        <b>Context Precision</b> — are the retrieved chunks relevant to the question?<br>
+        <b>Context Recall</b> — do the chunks contain enough info to answer correctly?
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        n_questions = st.slider(
+            "Number of questions to evaluate",
+            min_value=5, max_value=40, value=10, step=5,
+            help="More questions = more accurate results but takes longer to run"
+        )
+
+        unit_filter = st.selectbox(
+            "Filter by unit",
+            ["All Units", "Unit I", "Unit II", "Unit III", "Unit IV"],
+            label_visibility="collapsed"
+        )
+
+        if st.button("▶ Run RAGAs Evaluation", use_container_width=True):
+            try:
+                import json
+                import traceback
+                from pathlib import Path
+
+                # ── Load test dataset ──
+                dataset_path = Path("evaluation/results/test_dataset.json")
+                if not dataset_path.exists():
+                    st.error("Test dataset not found at evaluation/results/test_dataset.json — run evaluation/test_dataset.py first.")
+                    st.stop()
+
+                with open(dataset_path, "r") as f:
+                    all_questions = json.load(f)
+
+                # Apply unit filter
+                if unit_filter != "All Units":
+                    all_questions = [q for q in all_questions if q["unit"] == unit_filter]
+
+                if not all_questions:
+                    st.warning(f"No questions found for {unit_filter}.")
+                    st.stop()
+
+                questions_sample = all_questions[:n_questions]
+                retriever        = components["retriever"]
+                solver           = components["solver"]
+
+                # ── Query Solver + Pinecone for each question ──
+                st.info(f"Querying Solver and Pinecone for {len(questions_sample)} questions...")
+                progress_bar = st.progress(0)
+                status_text  = st.empty()
+
+                eval_questions    = []
+                eval_answers      = []
+                eval_contexts     = []
+                eval_ground_truth = []
+
+                for idx, item in enumerate(questions_sample):
+                    q = item["question"]
+                    status_text.caption(f"Processing: {q[:60]}...")
+
+                    # Get answer from Solver Agent
+                    try:
+                        solver_result = solver.explain(
+                            student_id=st.session_state.student_id,
+                            concept=q,
+                            message=q
+                        )
+                        answer = solver_result if isinstance(solver_result, str) else solver_result.get("response", "")
+                    except Exception:
+                        answer = ""
+
+                    # Get contexts from Pinecone
+                    try:
+                        chunks   = retriever.retrieve_for_solver(q)
+                        contexts = [c["text"] for c in chunks] if chunks else ["no context retrieved"]
+                    except Exception:
+                        contexts = ["no context retrieved"]
+
+                    eval_questions.append(q)
+                    eval_answers.append(answer)
+                    eval_contexts.append(contexts)
+                    eval_ground_truth.append(item["ground_truth"])
+                    progress_bar.progress((idx + 1) / len(questions_sample))
+
+                status_text.empty()
+
+                # ── Build RAGAs dataset ──
+                from datasets import Dataset as HFDataset
+                ragas_data = HFDataset.from_dict({
+                    "question":    eval_questions,
+                    "answer":      eval_answers,
+                    "contexts":    eval_contexts,
+                    "ground_truth": eval_ground_truth,
+                })
+
+                # ── Set up Groq as judge ──
+                import os
+                from ragas import evaluate
+                from ragas.metrics import (
+                    faithfulness,
+                    answer_relevancy,
+                    context_precision,
+                    context_recall,
+                )
+                from ragas.llms import LangchainLLMWrapper
+                from langchain_groq import ChatGroq
+
+                groq_api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
+                groq_llm     = ChatGroq(
+                    model="llama-3.3-70b-versatile",
+                    api_key=groq_api_key,
+                    temperature=0
+                )
+                ragas_llm = LangchainLLMWrapper(groq_llm)
+
+                st.info("Running RAGAs scoring with Groq as judge...")
+                results = evaluate(
+                    ragas_data,
+                    metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
+                    llm=ragas_llm
+                )
+
+                # ══════════════════════════════════════════════════
+                # OVERALL SCORES
+                # ══════════════════════════════════════════════════
+                st.markdown("---")
+                st.markdown('<div class="panel-header">Overall Scores</div>', unsafe_allow_html=True)
+
+                scores = {
+                    "Faithfulness":      round(float(results["faithfulness"]), 3),
+                    "Answer Relevancy":  round(float(results["answer_relevancy"]), 3),
+                    "Context Precision": round(float(results["context_precision"]), 3),
+                    "Context Recall":    round(float(results["context_recall"]), 3),
+                }
+                avg_score = round(sum(scores.values()) / len(scores), 3)
+
+                def score_color(s):
+                    return "#059669" if s >= 0.7 else "#F59E0B" if s >= 0.5 else "#EF4444"
+
+                sc1, sc2, sc3, sc4 = st.columns(4)
+                for col, (metric, score) in zip([sc1, sc2, sc3, sc4], scores.items()):
+                    with col:
+                        st.markdown(
+                            f'<div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;'
+                            f'padding:0.7rem;text-align:center">'
+                            f'<div style="font-size:1.5rem;font-weight:800;color:{score_color(score)}">{score}</div>'
+                            f'<div style="font-size:0.58rem;color:#64748B;margin-top:0.2rem;line-height:1.4">{metric}</div>'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
+
+                st.markdown(
+                    f'<div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:8px;'
+                    f'padding:0.6rem;text-align:center;margin-top:0.6rem">'
+                    f'<span style="font-size:0.7rem;font-weight:700;color:#065F46">AVERAGE SCORE: </span>'
+                    f'<span style="font-size:1.1rem;font-weight:800;color:{score_color(avg_score)}">{avg_score}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+                # ── Score guide ──
+                st.markdown("""
+                <div style="font-size:0.65rem;color:#94A3B8;margin-top:0.5rem;text-align:center">
+                <span style="color:#059669">≥ 0.7 Good</span> &nbsp;·&nbsp;
+                <span style="color:#F59E0B">0.5–0.69 Acceptable</span> &nbsp;·&nbsp;
+                <span style="color:#EF4444">&lt; 0.5 Needs improvement</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # ══════════════════════════════════════════════════
+                # PER QUESTION BREAKDOWN
+                # ══════════════════════════════════════════════════
+                st.markdown("---")
+                st.markdown('<div class="panel-header">Per Question Breakdown</div>', unsafe_allow_html=True)
+
+                import pandas as pd
+                df_results = results.to_pandas()
+
+                df_display = pd.DataFrame({
+                    "Question":      eval_questions,
+                    "Faithfulness":  df_results["faithfulness"].round(3),
+                    "Ans Relevancy": df_results["answer_relevancy"].round(3),
+                    "Ctx Precision": df_results["context_precision"].round(3),
+                    "Ctx Recall":    df_results["context_recall"].round(3),
+                    "Model Answer":  eval_answers,
+                    "Ground Truth":  eval_ground_truth,
+                })
+
+                st.dataframe(
+                    df_display,
+                    use_container_width=True,
+                    height=360,
+                    column_config={
+                        "Question":      st.column_config.TextColumn(width="large"),
+                        "Faithfulness":  st.column_config.NumberColumn(format="%.3f"),
+                        "Ans Relevancy": st.column_config.NumberColumn(format="%.3f"),
+                        "Ctx Precision": st.column_config.NumberColumn(format="%.3f"),
+                        "Ctx Recall":    st.column_config.NumberColumn(format="%.3f"),
+                        "Model Answer":  st.column_config.TextColumn(width="large"),
+                        "Ground Truth":  st.column_config.TextColumn(width="large"),
+                    }
+                )
+
+                # ══════════════════════════════════════════════════
+                # WEAKEST QUESTIONS
+                # ══════════════════════════════════════════════════
+                st.markdown("---")
+                st.markdown('<div class="panel-header">Weakest Questions</div>', unsafe_allow_html=True)
+                st.caption("Bottom 5 questions by average score across all 4 metrics.")
+
+                df_display["Avg Score"] = df_display[
+                    ["Faithfulness", "Ans Relevancy", "Ctx Precision", "Ctx Recall"]
+                ].mean(axis=1).round(3)
+
+                weakest = df_display.nsmallest(5, "Avg Score")[
+                    ["Question", "Avg Score", "Faithfulness", "Ans Relevancy", "Ctx Precision", "Ctx Recall"]
+                ]
+                st.dataframe(weakest, use_container_width=True)
+
+                # ══════════════════════════════════════════════════
+                # DOWNLOAD
+                # ══════════════════════════════════════════════════
+                st.markdown("---")
+                csv = df_display.to_csv(index=False)
+                st.download_button(
+                    label="⬇ Download full results as .csv",
+                    data=csv,
+                    file_name="mosaic_ragas_results.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+
+            except ImportError as e:
+                st.error(f"Missing package: {e}")
+                st.caption("Add these to requirements.txt: ragas, langchain-groq, datasets")
+            except Exception as e:
+                st.error(f"Evaluation failed: {e}")
+                st.code(traceback.format_exc())
+
