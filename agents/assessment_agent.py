@@ -1,6 +1,6 @@
 # agents/assessment_agent.py
 # Tests student understanding and gives an objective score
-# Updates KG node colors during assessment
+# Updates curriculum KG Topic node status during assessment
 
 import json
 from llm_client import LLMClient
@@ -9,7 +9,7 @@ from kg.neo4j_client import Neo4jClient
 from memory.letta_client import LettaClient
 
 ASSESSMENT_SYSTEM_PROMPT = """
-You are a strict and fair assessment evaluator for AI and data science education.
+You are a strict and fair assessment evaluator for data science education.
 
 Your ONLY job is to:
 1. Generate appropriate questions to test understanding
@@ -38,17 +38,17 @@ class AssessmentAgent:
     """
     Assessment Agent.
 
-    Triggered after Solver explains a concept.
+    Triggered from Assessment Tab.
     Always followed by Feedback Agent regardless of score.
 
     KG color updates:
-    - yellow = concept is being assessed right now
+    - yellow = topic is being assessed right now
 
     Reads from Letta:  what was already tested, student level
-    Reads from KG:     related concepts to test together
-    Reads from RAG:    misconceptions and question material
+    Reads from KG:     related topics and techniques to test
+    Reads from RAG:    question material
     Writes to Letta:   question asked, raw score
-    Writes to KG:      sets node to yellow (being assessed)
+    Writes to KG:      sets Topic node to yellow (being assessed)
     """
 
     def __init__(
@@ -58,39 +58,48 @@ class AssessmentAgent:
         neo4j: Neo4jClient,
         letta: LettaClient
     ):
-        self.llm = llm
+        self.llm      = llm
         self.retriever = retriever
-        self.neo4j = neo4j
-        self.letta = letta
+        self.neo4j    = neo4j
+        self.letta    = letta
 
     def generate_question(self, student_id: str, concept: str) -> dict:
         """
         Generate one assessment question for a concept.
-        Sets KG node to yellow while being assessed.
-
-        Returns:
-            {
-                "question": "...",
-                "question_type": "code / explanation / application",
-                "concept": "...",
-                "related_concepts": [...],
-                "expected_answer_points": [...]
-            }
+        Maps concept to nearest curriculum Topic.
+        Sets that Topic node to yellow while being assessed.
         """
         student_memory = self.letta.read_core_memory(student_id)
         student_level  = student_memory.get("current_level", "intermediate")
 
-        related        = self.neo4j.get_related_concepts(concept)
+        # Map to curriculum topic first
+        matched_topic = self.neo4j.map_concept_to_topic(concept)
+        topic_to_use  = matched_topic if matched_topic else concept
+
+        # Get techniques under this topic for detailed questions
+        techniques     = self.neo4j.get_topic_techniques(topic_to_use)
+        technique_names = [t["name"] for t in techniques]
+
+        # Get related topics from curriculum KG
+        related = self.neo4j.get_related_topics(topic_to_use)
+
+        # Check unmastered prerequisites
+        unmastered_prereqs = self.neo4j.get_unmastered_prerequisites(topic_to_use)
+
+        # Query RAG for question material
         rag_docs       = self.retriever.retrieve_for_assessment(concept)
         misconceptions = "\n".join([doc["text"] for doc in rag_docs])
         already_tested = self.letta.get_tested_questions(student_id, concept)
 
         user_message = f"""
 Generate ONE assessment question for:
-Concept:        {concept}
-Student Level:  {student_level}
-Related concepts to incorporate: {related[:3]}
-Common misconceptions to probe:  {misconceptions[:500] if misconceptions else "None available"}
+Concept:                  {concept}
+Matched curriculum topic: {topic_to_use}
+Student Level:            {student_level}
+Techniques to probe:      {technique_names[:5]}
+Related topics:           {related[:3]}
+Unmastered prerequisites: {[p for p in unmastered_prereqs]}
+Common misconceptions:    {misconceptions[:500] if misconceptions else "None available"}
 Questions already asked (do NOT repeat): {already_tested}
 
 Return ONLY this JSON:
@@ -113,22 +122,22 @@ Return ONLY this JSON:
             clean         = response.strip().replace("```json", "").replace("```", "")
             question_data = json.loads(clean)
 
-            # Write to shared Letta memory
+            # Write to Letta memory
             self.letta.write_archival_memory(student_id, {
                 "type":          "question_asked",
                 "concept":       concept,
+                "topic":         topic_to_use,
                 "question":      question_data.get("question", ""),
                 "question_type": question_data.get("question_type", "")
             })
 
-            # ── KG: set node to YELLOW — being assessed ──
-            self.neo4j.update_node_status(concept, "yellow")
+            # Set curriculum Topic node to yellow — being assessed
+            self.neo4j.update_node_status(topic_to_use, "yellow")
 
             return question_data
 
         except json.JSONDecodeError:
-            # Fallback question if JSON parsing fails
-            self.neo4j.update_node_status(concept, "yellow")
+            self.neo4j.update_node_status(topic_to_use, "yellow")
             return {
                 "question":               f"Explain {concept} in your own words and provide a code example.",
                 "question_type":          "explanation",
@@ -147,16 +156,7 @@ Return ONLY this JSON:
     ) -> dict:
         """
         Objectively evaluate a student's answer.
-        Note: KG color update happens in Feedback Agent after this.
-
-        Returns:
-            {
-                "score": 0-100,
-                "what_was_right": [...],
-                "what_was_wrong": [...],
-                "passed": bool,
-                "misconception": "..."
-            }
+        KG color update happens in Feedback Agent after this.
         """
         user_message = f"""
 Evaluate this student answer:
@@ -188,7 +188,7 @@ Return ONLY this JSON:
             clean  = response.strip().replace("```json", "").replace("```", "")
             result = json.loads(clean)
 
-            # Write result to shared Letta memory
+            # Write result to Letta memory
             self.letta.write_archival_memory(student_id, {
                 "type":           "assessment_result",
                 "concept":        concept,
