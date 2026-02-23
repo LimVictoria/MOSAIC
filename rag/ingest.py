@@ -90,7 +90,57 @@ class DocumentIngester:
             print(f"  Uploaded {total_uploaded}/{len(chunks)} chunks...")
 
         print(f"Done: {source} — {len(chunks)} chunks in namespace '{namespace}'")
+    def ingest_text(
+        self,
+        text: str,
+        topic_area: str,
+        source: str,
+        namespace: str = "knowledge_base",
+        force: bool = False
+    ):
+        """
+        Ingest pre-extracted text directly into Pinecone.
+        Used for file types like .ipynb where text extraction
+        happens outside this class.
+        """
+        if not force:
+            already_ingested = self.retriever.get_ingested_sources(namespace)
+            if source in already_ingested:
+                print(f"Skipping (already ingested): {source}")
+                return
 
+        print(f"Ingesting: {source}")
+        chunks = self._chunk_text(text)
+
+        if not chunks:
+            print(f"No chunks extracted from {source}")
+            return
+
+        batch_size     = 100
+        total_uploaded = 0
+
+        for i in range(0, len(chunks), batch_size):
+            batch_chunks = chunks[i:i + batch_size]
+            embeddings   = self.embedder.embed_documents(batch_chunks)
+
+            vectors = []
+            for j, (chunk, embedding) in enumerate(zip(batch_chunks, embeddings)):
+                vectors.append({
+                    "id": str(uuid.uuid4()),
+                    "values": embedding,
+                    "metadata": {
+                        "text":        chunk,
+                        "source":      source,
+                        "topic_area":  topic_area,
+                        "chunk_index": i + j
+                    }
+                })
+
+            self.retriever.index.upsert(vectors=vectors, namespace=namespace)
+            total_uploaded += len(vectors)
+            print(f"  Uploaded {total_uploaded}/{len(chunks)} chunks...")
+
+        print(f"Done: {source} — {len(chunks)} chunks in namespace '{namespace}'")
     def ingest_directory(
         self,
         directory: str,
