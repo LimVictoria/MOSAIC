@@ -793,11 +793,29 @@ with col_right:
                 )
                 ragas_llm = LangchainLLMWrapper(groq_llm)
 
-                st.info("Running RAGAs scoring with Groq as judge...")
+                # Use BGE embedder already in the project — avoids OpenAI dependency
+                from ragas.embeddings import BaseRagasEmbeddings
+                from langchain_core.embeddings import Embeddings as LCEmbeddings
+
+                class BGELangchainWrapper(LCEmbeddings):
+                    """Wraps our existing BGEEmbedder for RAGAs compatibility."""
+                    def __init__(self, bge_embedder):
+                        self._embedder = bge_embedder
+                    def embed_documents(self, texts):
+                        return self._embedder.embed_documents(texts)
+                    def embed_query(self, text):
+                        return self._embedder.embed_query(text)
+
+                from ragas.embeddings import LangchainEmbeddingsWrapper
+                bge_embedder   = components["embedder"]
+                ragas_embedder = LangchainEmbeddingsWrapper(BGELangchainWrapper(bge_embedder))
+
+                st.info("Running RAGAs scoring with Groq as judge and BGE as embedder...")
                 results = evaluate(
                     ragas_data,
                     metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
-                    llm=ragas_llm
+                    llm=ragas_llm,
+                    embeddings=ragas_embedder
                 )
 
                 # ══════════════════════════════════════════════════
