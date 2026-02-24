@@ -292,10 +292,12 @@ def render_message(msg: dict):
             unsafe_allow_html=True)
     else:
         tag, cls = AGENT_TAGS.get(msg.get("agent", "System"), ("SYSTEM", "tag-system"))
+        # Render agent tag as HTML, then content as markdown separately
+        # Fixes: ** showing as asterisks, </div> leaking into response
         st.markdown(
-            f'<span class="agent-tag {cls}">{tag}</span>'
-            f'<div class="message-assistant">{msg["content"]}</div>',
+            f'<span class="agent-tag {cls}">{tag}</span>',
             unsafe_allow_html=True)
+        st.markdown(msg["content"])
 
 def render_kg(kg_data: dict, height: int = 380):
     elements   = kg_data.get("elements", {})
@@ -343,7 +345,8 @@ def render_kg(kg_data: dict, height: int = 380):
             source=e["data"]["source"], target=e["data"]["target"],
             label=e["data"].get("relationship", "").replace("_", " ").lower(),
             color=edge_colors.get(e["data"].get("relationship", "RELATED_TO"), "#94A3B8"),
-            arrows="to"
+            arrows="to",
+            font={"size": 7, "color": "#94A3B8", "strokeWidth": 0}
         ) for e in edges_data
     ]
 
