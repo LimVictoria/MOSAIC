@@ -33,9 +33,9 @@ LETTA_BASE_URL = get_secret("LETTA_BASE_URL", "https://api.letta.com")
 LETTA_API_KEY  = get_secret("LETTA_API_KEY", "")
 
 # ─── RAG ───
-RAG_TOP_K         = 5
+RAG_TOP_K         = 3    # reduced from 5 — fewer chunks = higher precision
 RAG_CHUNK_SIZE    = 400
-RAG_CHUNK_OVERLAP = 50
+RAG_CHUNK_OVERLAP = 20   # reduced from 50 — less duplicate content between chunks
 
 # ─── KG ───
 KG_VISIBLE_THRESHOLD = 1
