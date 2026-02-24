@@ -75,10 +75,10 @@ class RAGRetriever:
         return self.retrieve(query, top_k=5, topic_filter=topic, namespace="knowledge_base")
 
     def retrieve_for_assessment(self, concept: str) -> list[dict]:
-    return self.retrieve(
-        f"assessment questions about {concept}",
-        top_k=3,
-        namespace="knowledge_base"    # ← use existing namespace
+        return self.retrieve(
+            f"assessment questions about {concept}",
+            top_k=3,
+            namespace="knowledge_base"    # ← use existing namespace
         )
 
     def retrieve_for_feedback(self, misconception: str) -> list[dict]:
