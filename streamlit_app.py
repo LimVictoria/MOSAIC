@@ -203,7 +203,7 @@ AGENT_TAGS = {
 for key, val in {
     "messages": [],
     "student_id": f"student_{random.randint(1000, 9999)}",
-    "current_concept": None, "current_question": None,
+    "current_concept": None, "current_question": None, "assessment_result": None,
     "kg_data": None, "kg_visible": False, "last_kg_refresh": 0,
     "response_style": "Balanced", "difficulty_override": "Auto",
 }.items():
@@ -474,7 +474,7 @@ with col_left:
         st.markdown('<div class="panel-header">Test your understanding</div>', unsafe_allow_html=True)
 
         concept_input = st.text_input(
-            "Concept", placeholder="e.g. gradient descent...", key="assess_concept")
+            "Concept", placeholder="e.g. EDA, imputation...", key="assess_concept")
 
         if st.button("Get Question →", key="get_q", use_container_width=True):
             if concept_input:
@@ -483,77 +483,13 @@ with col_left:
                 if q:
                     st.session_state.current_question = q
                     st.session_state.current_concept  = concept_input
+                    st.session_state.assessment_result = None  # clear previous result
             else:
                 st.warning("Enter a concept first.")
 
         if st.session_state.current_question:
-            q = st.session_state.current_question
             st.markdown("---")
-            st.markdown(
-                f'<span class="agent-tag tag-assessment">QUESTION</span>'
-                f'<div class="message-assistant">{q["question"]}</div>',
-                unsafe_allow_html=True)
-            st.caption(f"Type: {q.get('question_type','general')} · {q.get('concept','')}")
-
-            answer = st.text_area(
-                "Your answer", placeholder="Type your answer...",
-                height=120, key="ans")
-
-            if st.button("Submit →", key="submit", use_container_width=True):
-                if answer:
-                    with st.spinner("Evaluating..."):
-                        result = call_evaluate(
-                            q.get("concept", concept_input),
-                            q["question"], answer,
-                            q.get("expected_answer_points", []))
-                    if result:
-                        score  = result.get("score", 0)
-                        passed = result.get("passed", False)
-                        color  = "#059669" if passed else "#EF4444"
-                        badge  = "✓ PASSED" if passed else "✗ FAILED"
-
-                        st.markdown(
-                            f'<div style="background:#F8FAFC;border:1px solid #E2E8F0;'
-                            f'border-radius:8px;padding:0.8rem;margin:0.6rem 0">'
-                            f'<div style="font-family:Syne,sans-serif;font-size:1.8rem;'
-                            f'font-weight:800;color:{color}">{score} '
-                            f'<span style="font-size:0.8rem">{badge}</span></div>'
-                            f'<div style="font-size:0.7rem;color:#059669;margin-top:0.3rem">'
-                            f'✅ {" · ".join(result.get("what_was_right", []))}</div>'
-                            f'<div style="font-size:0.7rem;color:#EF4444;margin-top:0.2rem">'
-                            f'❌ {" · ".join(result.get("what_was_wrong", []))}</div></div>',
-                            unsafe_allow_html=True)
-
-                        st.markdown(
-                            f'<span class="agent-tag tag-feedback">FEEDBACK</span>'
-                            f'<div class="message-assistant">{result.get("feedback","")}</div>',
-                            unsafe_allow_html=True)
-
-                        next_action = result.get("next_action", "")
-                        re_teach    = result.get("re_teach_focus", "")
-
-                        if next_action == "advance":
-                            st.success("✓ Ready to advance!")
-                        elif next_action == "re_teach" and re_teach:
-                            st.warning(f"↩ Review: **{re_teach}**")
-                            if st.button(f"Re-explain {re_teach}", key="reteach"):
-                                st.session_state.messages.append(
-                                    {"role": "user", "content": f"Re-explain {re_teach}"})
-                                with st.spinner("Re-teaching..."):
-                                    r = call_chat(f"Re-explain {re_teach}")
-                                st.session_state.messages.append({
-                                    "role": "assistant", "content": r["response"],
-                                    "agent": "Solver"})
-                                st.session_state.current_question = None
-                                st.rerun()
-                        elif next_action == "practice_more":
-                            st.info("Keep practising before moving on.")
-
-                        if st.button("Next Question →", key="next_q"):
-                            st.session_state.current_question = None
-                            st.rerun()
-                else:
-                    st.warning("Write your answer first.")
+            st.caption("📝 Question ready — answer on the right →")
 
     # ── SETTINGS ──
     with tab_settings:
@@ -1007,21 +943,102 @@ Context Recall: 0.X"""
 # ══════════════════════════════════════════════════════
 with col_right:
 
-    st.markdown('<div class="panel-header">Conversation</div>', unsafe_allow_html=True)
+    # ── Assessment view — shown when a question is active ──
+    if st.session_state.get("current_question"):
+        q             = st.session_state.current_question
+        concept_input = st.session_state.get("current_concept", "")
 
-    if not st.session_state.messages:
-        st.markdown(
-            '<div style="padding:2rem 0;color:#94A3B8;font-size:0.78rem;text-align:center">'
-            'Ask a question to get started.</div>',
-            unsafe_allow_html=True)
+        st.markdown('<div class="panel-header">Assessment</div>', unsafe_allow_html=True)
+
+        # Question display using markdown (not injected into HTML div)
+        st.markdown('<span class="agent-tag tag-assessment">QUESTION</span>', unsafe_allow_html=True)
+        st.markdown(q["question"])
+        st.caption(f"Type: {q.get('question_type','general')} · {q.get('concept','')}")
+        st.markdown("---")
+
+        # Answer input
+        answer = st.text_area(
+            "Your answer", placeholder="Type your answer here...",
+            height=160, key="ans")
+
+        if st.button("Submit →", key="submit", use_container_width=True):
+            if answer:
+                with st.spinner("Evaluating..."):
+                    result = call_evaluate(
+                        q.get("concept", concept_input),
+                        q["question"], answer,
+                        q.get("expected_answer_points", []))
+                if result:
+                    st.session_state.assessment_result = result
+            else:
+                st.warning("Write your answer first.")
+
+        # Show result if available
+        if st.session_state.get("assessment_result"):
+            result = st.session_state.assessment_result
+            score  = result.get("score", 0)
+            passed = result.get("passed", False)
+            color  = "#059669" if passed else "#EF4444"
+            badge  = "✓ PASSED" if passed else "✗ FAILED"
+
+            st.markdown(
+                f'<div style="background:#F8FAFC;border:1px solid #E2E8F0;'
+                f'border-radius:8px;padding:0.8rem;margin:0.6rem 0">'
+                f'<div style="font-family:Syne,sans-serif;font-size:1.8rem;'
+                f'font-weight:800;color:{color}">{score} '
+                f'<span style="font-size:0.8rem">{badge}</span></div>'
+                f'<div style="font-size:0.7rem;color:#059669;margin-top:0.3rem">'
+                f'✅ {" · ".join(result.get("what_was_right", []))}</div>'
+                f'<div style="font-size:0.7rem;color:#EF4444;margin-top:0.2rem">'
+                f'❌ {" · ".join(result.get("what_was_wrong", []))}</div></div>',
+                unsafe_allow_html=True)
+
+            st.markdown('<span class="agent-tag tag-feedback">FEEDBACK</span>', unsafe_allow_html=True)
+            st.markdown(result.get("feedback", ""))
+
+            next_action = result.get("next_action", "")
+            re_teach    = result.get("re_teach_focus", "")
+
+            if next_action == "advance":
+                st.success("✓ Ready to advance!")
+            elif next_action == "re_teach" and re_teach:
+                st.warning(f"↩ Review: **{re_teach}**")
+                if st.button(f"Re-explain {re_teach}", key="reteach"):
+                    st.session_state.messages.append(
+                        {"role": "user", "content": f"Re-explain {re_teach}"})
+                    with st.spinner("Re-teaching..."):
+                        r = call_chat(f"Re-explain {re_teach}")
+                    st.session_state.messages.append({
+                        "role": "assistant", "content": r["response"],
+                        "agent": "Solver"})
+                    st.session_state.current_question  = None
+                    st.session_state.assessment_result = None
+                    st.rerun()
+            elif next_action == "practice_more":
+                st.info("Keep practising before moving on.")
+
+            if st.button("Next Question →", key="next_q"):
+                st.session_state.current_question  = None
+                st.session_state.assessment_result = None
+                st.rerun()
+
+    # ── Conversation view — shown when no active question ──
     else:
-        messages = st.session_state.messages
+        st.markdown('<div class="panel-header">Conversation</div>', unsafe_allow_html=True)
 
-        # Handle unpaired last message (user sent, no reply yet)
-        if len(messages) % 2 == 1:
-            render_message(messages[-1])
+        if not st.session_state.messages:
+            st.markdown(
+                '<div style="padding:2rem 0;color:#94A3B8;font-size:0.78rem;text-align:center">'
+                'Ask a question to get started.</div>',
+                unsafe_allow_html=True)
+        else:
+            messages = st.session_state.messages
 
-        # Render pairs newest first, user above assistant within each pair
-        for i in range(len(messages) - 2, -1, -2):
-            render_message(messages[i])    # user prompt
-            render_message(messages[i+1]) # assistant reply
+            # Handle unpaired last message (user sent, no reply yet)
+            if len(messages) % 2 == 1:
+                render_message(messages[-1])
+
+            # Render pairs newest first, user above assistant within each pair
+            for i in range(len(messages) - 2, -1, -2):
+                render_message(messages[i])    # user prompt
+                render_message(messages[i+1]) # assistant reply
