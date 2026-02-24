@@ -365,11 +365,7 @@ with hc1:
     st.markdown('<div class="tutor-title">MOSAICurriculum</div>', unsafe_allow_html=True)
     st.markdown('<div class="tutor-subtitle">Memory-Orchestrated Symbolic Agent Intelligent Curriculum</div>', unsafe_allow_html=True)
 with hc2:
-    color = "#059669" if COMPONENTS_LOADED else "#EF4444"
-    label = "● Ready" if COMPONENTS_LOADED else "● Error"
-    st.markdown(
-        f'<div style="text-align:right;padding-top:0.8rem;font-size:0.7rem;font-weight:700;color:{color}">{label}</div>',
-        unsafe_allow_html=True)
+    pass  # status indicator removed — clean header
 
 if not COMPONENTS_LOADED:
     st.error(f"Failed to load: {LOAD_ERROR}")
@@ -434,8 +430,9 @@ with col_left:
         ic, bc = st.columns([4, 1])
         with ic:
             user_input = st.text_input(
-                "msg", placeholder="e.g. explain gradient descent...",
-                label_visibility="collapsed", key="chat_input")
+                "msg", placeholder="Ask a question...",
+                label_visibility="collapsed", key="chat_input",
+                autocomplete="off")
         with bc:
             send = st.button("Send →", use_container_width=True, key="send_btn")
 
@@ -449,13 +446,74 @@ with col_left:
             st.rerun()
 
         st.markdown("---")
-        st.markdown('<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:0.5rem">Quick topics</div>', unsafe_allow_html=True)
+        # ── Dynamic quick topics based on curriculum progress ──
+        # Shows topics student hasn't mastered yet, starting from prerequisites
+        def get_quick_topics() -> list[str]:
+            """
+            Return suggested topics based on student progress.
+            Prioritises unmastered prerequisite topics first.
+            Falls back to curriculum starting topics if nothing in memory.
+            """
+            default_topics = [
+                "How do I read a CSV file in Python?",
+                "What is a DataFrame?",
+                "How do I read an Excel file?",
+                "What is Exploratory Data Analysis?",
+                "What are the structured data types in Python?",
+                "How do I detect missing values?",
+            ]
+            if not COMPONENTS_LOADED:
+                return default_topics
+            try:
+                mastered = components["letta"].get_mastered_concepts(
+                    st.session_state.student_id)
+                # Get next recommended topic from curriculum KG
+                next_topic = components["neo4j"].get_next_recommended_topic()
+                # Get unmastered prerequisites for next topic
+                unmastered = components["neo4j"].get_unmastered_prerequisites(
+                    next_topic) if next_topic else []
 
-        quick_prompts = [
-            "Explain gradient descent", "What is backpropagation?",
-            "How do transformers work?", "Explain overfitting",
-            "What is RAG?", "Explain embeddings",
-        ]
+                # Build prompt suggestions from unmastered topics
+                topic_to_prompt = {
+                    "Python for Data Science":     "What Python libraries do I need for data science?",
+                    "Reading Structured Files":    "How do I read a CSV file in Python?",
+                    "Structured Data Types":       "What is a DataFrame and how do I use it?",
+                    "Exploratory Data Analysis":   "What is Exploratory Data Analysis?",
+                    "Data Visualization":          "How do I create a heatmap in Python?",
+                    "Imputation Techniques":       "How do I handle missing values?",
+                    "Data Augmentation":           "What is SMOTE and when should I use it?",
+                    "Feature Reduction":           "What is PCA and how does it work?",
+                    "Business Metrics":            "What are the key business metrics in data science?",
+                    "Preprocessing Summary":       "What is a data preprocessing pipeline?",
+                    "ML Frameworks":               "What is the difference between PyTorch and TensorFlow?",
+                }
+
+                suggestions = []
+                # Add unmastered prereqs first (most important)
+                for topic in unmastered:
+                    if topic in topic_to_prompt and topic not in mastered:
+                        suggestions.append(topic_to_prompt[topic])
+
+                # Add next recommended topic
+                if next_topic and next_topic in topic_to_prompt:
+                    prompt = topic_to_prompt[next_topic]
+                    if prompt not in suggestions:
+                        suggestions.append(prompt)
+
+                # Fill remaining slots with unmastered topics in order
+                for topic, prompt in topic_to_prompt.items():
+                    if len(suggestions) >= 6:
+                        break
+                    if topic not in mastered and prompt not in suggestions:
+                        suggestions.append(prompt)
+
+                return suggestions[:6] if suggestions else default_topics
+            except Exception:
+                return default_topics
+
+        quick_prompts = get_quick_topics()
+
+        st.markdown('<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:0.5rem">Suggested topics</div>', unsafe_allow_html=True)
         qc1, qc2 = st.columns(2)
         for i, prompt in enumerate(quick_prompts):
             col = qc1 if i % 2 == 0 else qc2
