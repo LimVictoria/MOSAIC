@@ -87,7 +87,7 @@ class SolverAgent:
 
         # 6. Query RAG for relevant documentation
         query       = focus if focus else (message if message else concept)
-        rag_docs    = self.retriever.retrieve_for_solver(query, topic=concept)
+        rag_docs    = self.retriever.retrieve_for_solver(query)#, topic=concept)
         rag_context = "\n\n".join([doc["text"] for doc in rag_docs])
 
         # 7. Build prompt
