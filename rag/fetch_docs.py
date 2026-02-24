@@ -1,6 +1,7 @@
 # rag/fetch_docs.py
 # Incremental ingestion — scans docs/ folder and ingests any new files
 # No hardcoding — just drop files into docs/ and run
+
 import json
 from pathlib import Path
 from rag.embedder import BGEEmbedder
@@ -10,23 +11,93 @@ from rag.ingest import DocumentIngester
 DOCS_DIR = Path("docs")
 
 # Topic area mapping based on filename keywords
-# Add more keywords here as you add new documents
+# Must match EXACT curriculum Topic names in Neo4j
 TOPIC_MAPPING = {
-    "pandas":      "python_data_science",
-    "numpy":       "python_data_science",
-    "matplotlib":  "python_data_science",
-    "python":      "python_data_science",
-    "seaborn":     "python_data_science",
-    "stats":       "statistics_probability",
-    "statistic":   "statistics_probability",
-    "probability": "statistics_probability",
-    "eda":         "data_wrangling_eda",
-    "wrangling":   "data_wrangling_eda",
-    "cleaning":    "data_wrangling_eda",
-    "exploratory": "data_wrangling_eda",
+    # Reading Structured Files
+    "excel":       "Reading Structured Files",
+    "csv":         "Reading Structured Files",
+    "json":        "Reading Structured Files",
+    "parquet":     "Reading Structured Files",
+    "read":        "Reading Structured Files",
+    "file":        "Reading Structured Files",
+    "structured":  "Reading Structured Files",
+
+    # Structured Data Types
+    "dataframe":   "Structured Data Types",
+    "datatype":    "Structured Data Types",
+    "data_type":   "Structured Data Types",
+    "vector":      "Structured Data Types",
+    "array":       "Structured Data Types",
+    "tensor":      "Structured Data Types",
+    "sql":         "Structured Data Types",
+
+    # Exploratory Data Analysis
+    "eda":         "Exploratory Data Analysis",
+    "exploratory": "Exploratory Data Analysis",
+    "wrangling":   "Exploratory Data Analysis",
+    "cleaning":    "Exploratory Data Analysis",
+    "outlier":     "Exploratory Data Analysis",
+    "correlation": "Exploratory Data Analysis",
+    "missing":     "Exploratory Data Analysis",
+
+    # Data Visualization
+    "visual":      "Data Visualization",
+    "plot":        "Data Visualization",
+    "chart":       "Data Visualization",
+    "matplotlib":  "Data Visualization",
+    "seaborn":     "Data Visualization",
+    "heatmap":     "Data Visualization",
+
+    # Imputation Techniques
+    "imputation":  "Imputation Techniques",
+    "impute":      "Imputation Techniques",
+    "fill":        "Imputation Techniques",
+    "interpolat":  "Imputation Techniques",
+    "kalman":      "Imputation Techniques",
+
+    # Data Augmentation
+    "augment":     "Data Augmentation",
+    "smote":       "Data Augmentation",
+    "oversample":  "Data Augmentation",
+    "imbalance":   "Data Augmentation",
+
+    # Feature Reduction
+    "feature":     "Feature Reduction",
+    "pca":         "Feature Reduction",
+    "reduction":   "Feature Reduction",
+    "dimension":   "Feature Reduction",
+
+    # Business Metrics
+    "metric":      "Business Metrics",
+    "kpi":         "Business Metrics",
+    "churn":       "Business Metrics",
+    "forecast":    "Business Metrics",
+    "business":    "Business Metrics",
+
+    # Preprocessing Summary
+    "preprocess":  "Preprocessing Summary",
+    "pipeline":    "Preprocessing Summary",
+    "transform":   "Preprocessing Summary",
+
+    # ML Frameworks
+    "pytorch":     "ML Frameworks",
+    "tensorflow":  "ML Frameworks",
+    "keras":       "ML Frameworks",
+    "sklearn":     "ML Frameworks",
+    "ml":          "ML Frameworks",
+    "machine":     "ML Frameworks",
+    "model":       "ML Frameworks",
+
+    # Python for Data Science (catch-all for general python)
+    "python":      "Python for Data Science",
+    "pandas":      "Python for Data Science",
+    "numpy":       "Python for Data Science",
+    "stats":       "Python for Data Science",
+    "statistic":   "Python for Data Science",
 }
 
 SUPPORTED_FORMATS = [".pdf", ".html", ".htm", ".txt", ".md", ".ipynb"]
+
 
 def extract_text_from_ipynb(filepath: str) -> str:
     """Extract text and code from Jupyter notebook cells."""
@@ -44,13 +115,14 @@ def extract_text_from_ipynb(filepath: str) -> str:
 def get_topic_area(filename: str) -> str:
     """
     Infer topic area from filename keywords.
-    Falls back to 'general' if no keyword matches.
+    Returns exact curriculum Topic name for precise Pinecone filtering.
+    Falls back to 'Python for Data Science' if no keyword matches.
     """
     name_lower = filename.lower()
     for keyword, topic in TOPIC_MAPPING.items():
         if keyword in name_lower:
             return topic
-    return "general"
+    return "Python for Data Science"
 
 
 def run_ingestion():
@@ -91,7 +163,7 @@ def run_ingestion():
 
     # Check what's already in Pinecone
     already_ingested = retriever.get_ingested_sources("knowledge_base")
-    new_files = [f for f in all_files if f.name not in already_ingested]
+    new_files        = [f for f in all_files if f.name not in already_ingested]
 
     print(f"Already in Pinecone : {len(already_ingested)} files")
     print(f"New files to ingest : {len(new_files)} files")
