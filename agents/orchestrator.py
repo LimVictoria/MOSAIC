@@ -43,14 +43,27 @@ Reply with ONLY one word: YES or NO.
 """
 
 CONCEPT_EXTRACT_PROMPT = """
-Extract the main technical concept from the student's message.
+You are a curriculum topic classifier for a data science course.
 
-Reply with ONLY the concept name in title case (e.g. "Transformer", "Gradient Descent", "BERT").
-If you cannot identify a specific concept, reply with: NONE
+Map the student's message to the most relevant curriculum topic from this list:
+- Python for Data Science
+- Reading Structured Files
+- Structured Data Types
+- Exploratory Data Analysis
+- Data Visualization
+- Imputation Techniques
+- Data Augmentation
+- Feature Reduction
+- Business Metrics
+- Preprocessing Summary
+- ML Frameworks
+
+Reply with ONLY the exact topic name from the list above.
+If none match clearly, reply with the most relevant topic.
 """
 
 BRIEF_ANSWER_PROMPT = """
-You are MOSAIC, a friendly AI tutor specialising in AI engineering and data science.
+You are MOSAIC, a friendly AI tutor specialising in data science.
 
 Give a SHORT, conversational answer to the student's question.
 
@@ -75,10 +88,10 @@ Reply with ONLY one word: YES or NO.
 """
 
 CASUAL_CHAT_PROMPT = """
-You are MOSAIC, a friendly AI tutor specialising in AI engineering and data science.
+You are MOSAIC, a friendly AI tutor specialising in data science.
 
 Have a natural, warm, brief conversation. Keep it short and friendly.
-If they ask what you can do, explain you teach AI/ML concepts and can test understanding.
+If they ask what you can do, explain you teach data science concepts and can test understanding.
 """
 
 
@@ -101,6 +114,7 @@ class Orchestrator:
         self.llm             = solver.llm
         self.last_agent_used = None
         self.pending_concept: str | None = None
+        self.pending_message: str | None = None   # store original message for Solver
         self.graph = self._build_graph()
 
     def _build_graph(self):
@@ -152,7 +166,7 @@ class Orchestrator:
     def _classify(self, state: TutorState) -> TutorState:
         message = state["message"].strip().lower()
 
-        # 1. Explicit assessment — always takes priority over everything
+        # 1. Explicit assessment — always takes priority
         assessment_words = [
             "test me", "quiz me", "assess me", "give me a question",
             "practice question", "test my", "test on", "quiz on",
@@ -162,9 +176,10 @@ class Orchestrator:
         ]
         if any(w in message for w in assessment_words):
             self.pending_concept = None
+            self.pending_message = None
             return {**state, "intent": "assessment"}
 
-        # 2. Check if this is a follow-up "yes/no" to a pending concept
+        # 2. Check if this is a follow-up yes/no to pending concept
         if self.pending_concept:
             try:
                 answer = self.llm.generate(
@@ -174,15 +189,24 @@ class Orchestrator:
 
                 if answer.startswith("YES"):
                     concept = self.pending_concept
+                    original_message = self.pending_message or state["message"]
                     self.pending_concept = None
-                    return {**state, "intent": "solver", "concept": concept}
+                    self.pending_message = None
+                    return {
+                        **state,
+                        "intent":  "solver",
+                        "concept": concept,
+                        "message": original_message   # restore original message for RAG
+                    }
                 else:
                     self.pending_concept = None
+                    self.pending_message = None
                     # Fall through to normal classification
             except Exception:
                 self.pending_concept = None
+                self.pending_message = None
 
-        # 2. Pure casual chat keywords
+        # 3. Pure casual chat keywords
         casual_words = [
             "hi", "hello", "hey", "how are you", "what do you do",
             "who are you", "thanks", "thank you", "good morning",
@@ -193,7 +217,7 @@ class Orchestrator:
         if any(message == w or message.startswith(w + " ") for w in casual_words):
             return {**state, "intent": "chat"}
 
-        # 3. Everything else — check if technical, then route to brief answer
+        # 4. LLM classifier for everything else
         try:
             answer = self.llm.generate(
                 system_prompt=IS_TECHNICAL_PROMPT,
@@ -209,12 +233,13 @@ class Orchestrator:
         return state["intent"]
 
     def _extract_concept(self, message: str) -> str:
+        """Map student message to nearest curriculum Topic."""
         try:
             concept = self.llm.generate(
                 system_prompt=CONCEPT_EXTRACT_PROMPT,
                 user_message=message
             ).strip()
-            if concept.upper() == "NONE" or not concept:
+            if not concept:
                 return message[:60]
             return concept
         except Exception:
@@ -233,26 +258,33 @@ class Orchestrator:
         return {**state, "response": response, "agent_used": "Solver"}
 
     def _run_brief_answer(self, state: TutorState) -> TutorState:
-        """Give a short answer and store pending concept for follow-up."""
+        """Give a short answer and store pending concept + original message for follow-up."""
         try:
             response = self.llm.generate(
                 system_prompt=BRIEF_ANSWER_PROMPT,
                 user_message=state["message"]
             )
-            # Extract and store concept for potential follow-up
+            # Extract curriculum topic and store original message for Solver
             concept = self._extract_concept(state["message"])
             if concept:
                 self.pending_concept = concept
+                self.pending_message = state["message"]   # store original question
         except Exception as e:
             response = f"Something went wrong: {e}"
 
         return {**state, "response": response, "agent_used": "Solver"}
 
     def _run_solver(self, state: TutorState) -> TutorState:
+        """
+        Run Solver with both curriculum topic AND original message.
+        - concept → maps to curriculum KG node, updates status
+        - message → used for RAG retrieval to get relevant chunks
+        """
         response = self.solver.explain(
             student_id=state["student_id"],
             concept=state["concept"],
-            focus=state.get("re_teach_focus") or None
+            focus=state.get("re_teach_focus") or None,
+            message=state["message"]    # original message for RAG retrieval
         )
         return {**state, "response": response, "agent_used": "Solver"}
 
