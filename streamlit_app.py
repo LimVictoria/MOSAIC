@@ -663,7 +663,7 @@ with col_left:
     # ── EVALUATION ──
     with tab_eval:
         st.markdown('<div class="panel-header">RAGAs Evaluation</div>', unsafe_allow_html=True)
-        st.caption("Evaluates RAG pipeline quality using 4 RAGAs metrics. Uses Groq as judge — no extra cost.")
+        st.caption("Evaluates RAG pipeline quality using 4 RAGAs metrics. Uses Gemini as judge.")
 
         st.markdown("---")
         st.markdown('<div class="panel-header">Metrics explained</div>', unsafe_allow_html=True)
@@ -782,7 +782,7 @@ with col_left:
                 groq_api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
                 groq_client  = Groq(api_key=groq_api_key)
 
-                st.info("Scoring with Groq judge — 1 call per question...")
+                st.info("Scoring with Gemini judge — 1 call per question...")
                 score_bar    = st.progress(0)
                 score_status = st.empty()
 
