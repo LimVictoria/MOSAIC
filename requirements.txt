@@ -1,4 +1,4 @@
-# LLM
+# LLM + Evaluation (groq used for both)
 groq>=0.4.0
 
 # Memory
@@ -33,5 +33,3 @@ streamlit-agraph>=0.0.45
 # Utilities
 python-dotenv>=1.0.0
 tqdm>=4.66.0
-
-# Evaluation
