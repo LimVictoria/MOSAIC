@@ -663,7 +663,7 @@ with col_left:
     # ── EVALUATION ──
     with tab_eval:
         st.markdown('<div class="panel-header">RAGAs Evaluation</div>', unsafe_allow_html=True)
-        st.caption("Evaluates RAG pipeline quality using 4 RAGAs metrics. Uses Groq as judge.")
+        st.caption("Evaluates RAG pipeline quality using official RAGAs framework. Uses Gemini 1.5 Flash as judge.")
 
         st.markdown("---")
         st.markdown('<div class="panel-header">Metrics explained</div>', unsafe_allow_html=True)
@@ -775,112 +775,70 @@ with col_left:
                     st.error("All answers are empty — orchestrator is not returning responses.")
                     st.stop()
 
-                # ── Step 2: Score each question with Groq eval key (separate from teaching key) ──
+                # ── Step 2: Score with official RAGAs + Gemini as judge ──
                 import os
-                from groq import Groq
+                from ragas import evaluate
+                from ragas.metrics import (
+                    faithfulness,
+                    answer_relevancy,
+                    context_precision,
+                    context_recall,
+                )
+                from ragas.llms import LangchainLLMWrapper
+                from ragas.embeddings import LangchainEmbeddingsWrapper
+                from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+                from datasets import Dataset
 
-                eval_api_key = st.secrets.get("GROQ_API_KEY_EVAL", os.getenv("GROQ_API_KEY_EVAL", ""))
-                if not eval_api_key:
-                    # fallback to main key if eval key not set
-                    eval_api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
-                    st.caption("💡 Tip: Set GROQ_API_KEY_EVAL in secrets to use a separate quota for evaluation.")
+                gemini_api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
+                if not gemini_api_key:
+                    st.error("⚠️ GEMINI_API_KEY not set. Add it to Streamlit secrets.")
+                    st.stop()
 
-                eval_client = Groq(api_key=eval_api_key)
+                os.environ["GOOGLE_API_KEY"] = gemini_api_key
 
-                st.info("Scoring with Groq judge — 1 call per question...")
-                score_bar    = st.progress(0)
-                score_status = st.empty()
+                st.info("Scoring with RAGAs + Gemini judge — this may take a minute...")
 
-                faithfulness_scores      = []
-                answer_relevancy_scores  = []
-                context_precision_scores = []
-                context_recall_scores    = []
+                # Wrap Gemini for RAGAs
+                gemini_llm = LangchainLLMWrapper(
+                    ChatGoogleGenerativeAI(
+                        model="gemini-1.5-flash",
+                        google_api_key=gemini_api_key,
+                        temperature=0,
+                    )
+                )
+                gemini_embeddings = LangchainEmbeddingsWrapper(
+                    GoogleGenerativeAIEmbeddings(
+                        model="models/embedding-001",
+                        google_api_key=gemini_api_key,
+                    )
+                )
 
-                SCORE_PROMPT = """You are an expert evaluator for RAG (Retrieval Augmented Generation) systems.
-Score the following on a scale of 0.0 to 1.0.
+                # Build RAGAs dataset
+                ragas_dataset = Dataset.from_dict({
+                    "question":   eval_questions,
+                    "answer":     eval_answers,
+                    "contexts":   eval_contexts,
+                    "ground_truth": eval_ground_truth,
+                })
 
-Question: {question}
-Answer: {answer}
-Retrieved Context: {context}
-Ground Truth: {ground_truth}
+                # Configure metrics to use Gemini
+                metrics = [faithfulness, answer_relevancy, context_precision, context_recall]
+                for metric in metrics:
+                    metric.llm       = gemini_llm
+                    metric.embeddings = gemini_embeddings
 
-Score these 4 metrics:
-1. Faithfulness (0-1): Is the answer grounded in the retrieved context? Does it avoid hallucination?
-2. Answer Relevancy (0-1): Does the answer actually address the question asked?
-3. Context Precision (0-1): Is the retrieved context relevant to the question?
-4. Context Recall (0-1): Does the retrieved context contain enough information to answer the question correctly?
+                # Run RAGAs evaluation
+                ragas_result = evaluate(
+                    dataset=ragas_dataset,
+                    metrics=metrics,
+                )
 
-Reply ONLY with 4 numbers on separate lines in this exact format:
-Faithfulness: 0.X
-Answer Relevancy: 0.X
-Context Precision: 0.X
-Context Recall: 0.X"""
+                ragas_df = ragas_result.to_pandas()
 
-                for idx, (q, a, ctx, gt) in enumerate(zip(eval_questions, eval_answers, eval_contexts, eval_ground_truth)):
-                    score_status.caption(f"Scoring [{idx+1}/{len(eval_questions)}] {q[:50]}...")
-
-                    context_text = " ".join(ctx)[:1500]
-
-                    try:
-                        response = eval_client.chat.completions.create(
-                            model="llama-3.3-70b-versatile",
-                            messages=[{
-                                "role": "user",
-                                "content": SCORE_PROMPT.format(
-                                    question=q,
-                                    answer=a[:500],
-                                    context=context_text,
-                                    ground_truth=gt
-                                )
-                            }],
-                            temperature=0,
-                            max_tokens=100,
-                            n=1
-                        )
-
-                        raw = response.choices[0].message.content.strip()
-
-                        # Robust parsing — handles extra text before scores
-                        import re as _re
-                        def extract_score(pattern, text):
-                            m = _re.search(pattern, text, _re.IGNORECASE)
-                            if m:
-                                try:
-                                    return float(m.group(1))
-                                except Exception:
-                                    pass
-                            return 0.0
-
-                        f_score  = extract_score(r"Faithfulness[:\s]+([0-9.]+)", raw)
-                        ar_score = extract_score(r"Answer Relevancy[:\s]+([0-9.]+)", raw)
-                        cp_score = extract_score(r"Context Precision[:\s]+([0-9.]+)", raw)
-                        cr_score = extract_score(r"Context Recall[:\s]+([0-9.]+)", raw)
-
-                        faithfulness_scores.append(f_score)
-                        answer_relevancy_scores.append(ar_score)
-                        context_precision_scores.append(cp_score)
-                        context_recall_scores.append(cr_score)
-
-                    except Exception as ex:
-                        ex_str = str(ex)
-                        if "429" in ex_str or "rate_limit" in ex_str.lower() or "tokens per day" in ex_str.lower():
-                            score_bar.empty()
-                            score_status.empty()
-                            import re
-                            wait_match = re.search(r'try again in ([\d]+m[\d.]+s)', ex_str)
-                            wait_time  = wait_match.group(1) if wait_match else "a few hours"
-                            st.error(f"⚠️ Groq eval token limit reached. Please try again in **{wait_time}**.")
-                            st.info("💡 Tip: Set GROQ_API_KEY_EVAL in secrets to use a separate quota.")
-                            st.stop()
-                        # Non-rate-limit error — append NaN and continue
-                        faithfulness_scores.append(float("nan"))
-                        answer_relevancy_scores.append(float("nan"))
-                        context_precision_scores.append(float("nan"))
-                        context_recall_scores.append(float("nan"))
-
-                    score_bar.progress((idx + 1) / len(eval_questions))
-
-                score_status.empty()
+                faithfulness_scores      = ragas_df["faithfulness"].tolist()
+                answer_relevancy_scores  = ragas_df["answer_relevancy"].tolist()
+                context_precision_scores = ragas_df["context_precision"].tolist()
+                context_recall_scores    = ragas_df["context_recall"].tolist()
 
                 # ══════════════════════════════════════════════════
                 # OVERALL SCORES
