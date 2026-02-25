@@ -1,4 +1,4 @@
-# LLM + Evaluation (groq used for both)
+# LLM
 groq>=0.4.0
 
 # Memory
@@ -33,3 +33,9 @@ streamlit-agraph>=0.0.45
 # Utilities
 python-dotenv>=1.0.0
 tqdm>=4.66.0
+
+# Evaluation — RAGAs + Gemini judge
+ragas>=0.1.0
+datasets>=2.14.0
+google-generativeai>=0.5.0
+langchain-google-genai>=1.0.0
