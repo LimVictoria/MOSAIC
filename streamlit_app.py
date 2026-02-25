@@ -840,22 +840,21 @@ Context Recall: 0.X"""
 
                         raw = response.choices[0].message.content.strip()
 
-                        # Parse the 4 scores
-                        f_score  = 0.0
-                        ar_score = 0.0
-                        cp_score = 0.0
-                        cr_score = 0.0
+                        # Robust parsing — handles extra text before scores
+                        import re as _re
+                        def extract_score(pattern, text):
+                            m = _re.search(pattern, text, _re.IGNORECASE)
+                            if m:
+                                try:
+                                    return float(m.group(1))
+                                except Exception:
+                                    pass
+                            return 0.0
 
-                        for line in raw.split("\n"):
-                            line = line.strip()
-                            if line.startswith("Faithfulness:"):
-                                f_score  = float(line.split(":")[1].strip())
-                            elif line.startswith("Answer Relevancy:"):
-                                ar_score = float(line.split(":")[1].strip())
-                            elif line.startswith("Context Precision:"):
-                                cp_score = float(line.split(":")[1].strip())
-                            elif line.startswith("Context Recall:"):
-                                cr_score = float(line.split(":")[1].strip())
+                        f_score  = extract_score(r"Faithfulness[:\s]+([0-9.]+)", raw)
+                        ar_score = extract_score(r"Answer Relevancy[:\s]+([0-9.]+)", raw)
+                        cp_score = extract_score(r"Context Precision[:\s]+([0-9.]+)", raw)
+                        cr_score = extract_score(r"Context Recall[:\s]+([0-9.]+)", raw)
 
                         faithfulness_scores.append(f_score)
                         answer_relevancy_scores.append(ar_score)
