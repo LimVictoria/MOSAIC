@@ -663,7 +663,7 @@ with col_left:
     # ── EVALUATION ──
     with tab_eval:
         st.markdown('<div class="panel-header">RAGAs Evaluation</div>', unsafe_allow_html=True)
-        st.caption("Evaluates RAG pipeline quality using 4 RAGAs metrics. Uses Gemini as judge.")
+        st.caption("Evaluates RAG pipeline quality using 4 RAGAs metrics. Uses Groq as judge.")
 
         st.markdown("---")
         st.markdown('<div class="panel-header">Metrics explained</div>', unsafe_allow_html=True)
@@ -775,19 +775,19 @@ with col_left:
                     st.error("All answers are empty — orchestrator is not returning responses.")
                     st.stop()
 
-                # ── Step 2: Score each question with Gemini (separate quota from Groq) ──
+                # ── Step 2: Score each question with Groq eval key (separate from teaching key) ──
                 import os
-                import google.generativeai as genai
+                from groq import Groq
 
-                gemini_api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
-                if not gemini_api_key:
-                    st.error("⚠️ GEMINI_API_KEY not set. Add it to Streamlit secrets.")
-                    st.stop()
+                eval_api_key = st.secrets.get("GROQ_API_KEY_EVAL", os.getenv("GROQ_API_KEY_EVAL", ""))
+                if not eval_api_key:
+                    # fallback to main key if eval key not set
+                    eval_api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
+                    st.caption("💡 Tip: Set GROQ_API_KEY_EVAL in secrets to use a separate quota for evaluation.")
 
-                genai.configure(api_key=gemini_api_key)
-                gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+                eval_client = Groq(api_key=eval_api_key)
 
-                st.info("Scoring with Gemini judge — 1 call per question...")
+                st.info("Scoring with Groq judge — 1 call per question...")
                 score_bar    = st.progress(0)
                 score_status = st.empty()
 
@@ -822,20 +822,23 @@ Context Recall: 0.X"""
                     context_text = " ".join(ctx)[:1500]
 
                     try:
-                        response = gemini_model.generate_content(
-                            SCORE_PROMPT.format(
-                                question=q,
-                                answer=a[:500],
-                                context=context_text,
-                                ground_truth=gt
-                            ),
-                            generation_config=genai.GenerationConfig(
-                                temperature=0,
-                                max_output_tokens=100,
-                            )
+                        response = eval_client.chat.completions.create(
+                            model="llama-3.3-70b-versatile",
+                            messages=[{
+                                "role": "user",
+                                "content": SCORE_PROMPT.format(
+                                    question=q,
+                                    answer=a[:500],
+                                    context=context_text,
+                                    ground_truth=gt
+                                )
+                            }],
+                            temperature=0,
+                            max_tokens=100,
+                            n=1
                         )
 
-                        raw = response.text.strip()
+                        raw = response.choices[0].message.content.strip()
 
                         # Parse the 4 scores
                         f_score  = 0.0
@@ -861,11 +864,14 @@ Context Recall: 0.X"""
 
                     except Exception as ex:
                         ex_str = str(ex)
-                        if "429" in ex_str or "quota" in ex_str.lower() or "rate" in ex_str.lower():
+                        if "429" in ex_str or "rate_limit" in ex_str.lower() or "tokens per day" in ex_str.lower():
                             score_bar.empty()
                             score_status.empty()
-                            st.error("⚠️ Gemini rate limit reached. Please wait a moment and try again.")
-                            st.info("💡 Tip: Gemini free tier allows 15 requests/minute and 1500 requests/day.")
+                            import re
+                            wait_match = re.search(r'try again in ([\d]+m[\d.]+s)', ex_str)
+                            wait_time  = wait_match.group(1) if wait_match else "a few hours"
+                            st.error(f"⚠️ Groq eval token limit reached. Please try again in **{wait_time}**.")
+                            st.info("💡 Tip: Set GROQ_API_KEY_EVAL in secrets to use a separate quota.")
                             st.stop()
                         # Non-rate-limit error — append NaN and continue
                         faithfulness_scores.append(float("nan"))
@@ -874,7 +880,6 @@ Context Recall: 0.X"""
                         context_recall_scores.append(float("nan"))
 
                     score_bar.progress((idx + 1) / len(eval_questions))
-                    time.sleep(4)  # avoid Gemini 15 req/min rate limit
 
                 score_status.empty()
 
