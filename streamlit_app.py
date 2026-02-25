@@ -874,6 +874,7 @@ Context Recall: 0.X"""
                         context_recall_scores.append(float("nan"))
 
                     score_bar.progress((idx + 1) / len(eval_questions))
+                    time.sleep(4)  # avoid Gemini 15 req/min rate limit
 
                 score_status.empty()
 
