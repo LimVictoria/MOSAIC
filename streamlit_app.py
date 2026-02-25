@@ -832,6 +832,16 @@ with col_left:
                     metric.embeddings = gemini_embeddings
 
                 # Run RAGAs evaluation
+                # Streamlit runs in a thread with no event loop — create one manually
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_closed():
+                        raise RuntimeError("closed")
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
                 ragas_result = evaluate(
                     dataset=ragas_dataset,
                     metrics=metrics,
