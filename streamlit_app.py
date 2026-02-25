@@ -173,11 +173,7 @@ except Exception as e:
     LOAD_ERROR        = str(e)
     components        = {}
 
-if COMPONENTS_LOADED and not st.session_state.get("ingestion_done"):
-    with st.spinner("Checking knowledge base..."):
-        from rag.fetch_docs import run_ingestion
-        run_ingestion()
-    st.session_state.ingestion_done = True
+# ingestion runs after session state init — see below
 
 # ─────────────────────────────────────────────────────
 # Constants
@@ -206,9 +202,17 @@ for key, val in {
     "current_concept": None, "current_question": None, "assessment_result": None,
     "kg_data": None, "kg_visible": False, "last_kg_refresh": 0,
     "response_style": "Balanced", "difficulty_override": "Auto",
+    "ingestion_done": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
+
+# Run ingestion once per session — after session state is initialised
+if COMPONENTS_LOADED and not st.session_state["ingestion_done"]:
+    with st.spinner("Checking knowledge base..."):
+        from rag.fetch_docs import run_ingestion
+        run_ingestion()
+    st.session_state["ingestion_done"] = True
 
 # ─────────────────────────────────────────────────────
 # Agent helpers
