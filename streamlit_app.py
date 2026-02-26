@@ -831,31 +831,49 @@ with col_left:
                     metric.llm       = gemini_llm
                     metric.embeddings = gemini_embeddings
 
-                # Run RAGAs evaluation
-                # Streamlit runs in a thread with no event loop — create one manually
+                # Run RAGAs in a background thread with a hard wall-clock timeout
                 import asyncio
+                import threading
                 from ragas.run_config import RunConfig
 
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_closed():
-                        raise RuntimeError("closed")
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                ragas_result_holder = {"result": None, "error": None}
 
-                ragas_result = evaluate(
-                    dataset=ragas_dataset,
-                    metrics=metrics,
-                    raise_exceptions=False,
-                    run_config=RunConfig(
-                        timeout=60,
-                        max_retries=2,
-                        max_wait=30,
-                    ),
-                )
+                def run_ragas():
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        ragas_result_holder["result"] = evaluate(
+                            dataset=ragas_dataset,
+                            metrics=metrics,
+                            raise_exceptions=False,
+                            run_config=RunConfig(timeout=45, max_retries=1, max_wait=20),
+                        )
+                    except Exception as ex:
+                        ragas_result_holder["error"] = str(ex)
 
-                ragas_df = ragas_result.to_pandas()
+                MAX_WAIT_SECONDS = 60 * n_questions  # 60s per question max
+                ragas_thread = threading.Thread(target=run_ragas, daemon=True)
+                ragas_thread.start()
+
+                # Show live timer while waiting
+                timer_slot = st.empty()
+                elapsed = 0
+                while ragas_thread.is_alive() and elapsed < MAX_WAIT_SECONDS:
+                    timer_slot.caption(f"⏳ RAGAs scoring... {elapsed}s elapsed (max {MAX_WAIT_SECONDS}s)")
+                    time.sleep(2)
+                    elapsed += 2
+
+                timer_slot.empty()
+
+                if ragas_thread.is_alive():
+                    st.error(f"⏰ RAGAs timed out after {MAX_WAIT_SECONDS}s. Try fewer questions or check your GEMINI_API_KEY quota.")
+                    st.stop()
+
+                if ragas_result_holder["error"]:
+                    st.error(f"RAGAs error: {ragas_result_holder['error']}")
+                    st.stop()
+
+                ragas_df = ragas_result_holder["result"].to_pandas()
 
                 faithfulness_scores      = ragas_df["faithfulness"].tolist()
                 answer_relevancy_scores  = ragas_df["answer_relevancy"].tolist()
