@@ -834,6 +834,8 @@ with col_left:
                 # Run RAGAs evaluation
                 # Streamlit runs in a thread with no event loop — create one manually
                 import asyncio
+                from ragas.run_config import RunConfig
+
                 try:
                     loop = asyncio.get_event_loop()
                     if loop.is_closed():
@@ -845,6 +847,12 @@ with col_left:
                 ragas_result = evaluate(
                     dataset=ragas_dataset,
                     metrics=metrics,
+                    raise_exceptions=False,
+                    run_config=RunConfig(
+                        timeout=60,
+                        max_retries=2,
+                        max_wait=30,
+                    ),
                 )
 
                 ragas_df = ragas_result.to_pandas()
