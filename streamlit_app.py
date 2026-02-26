@@ -667,7 +667,7 @@ with col_left:
     # ── EVALUATION ──
     with tab_eval:
         st.markdown('<div class="panel-header">RAGAs Evaluation</div>', unsafe_allow_html=True)
-        st.caption("Evaluates RAG pipeline quality using official RAGAs framework. Uses Gemini 1.5 Flash as judge.")
+        st.caption("Evaluates RAG pipeline quality using 4 RAGAs-inspired metrics. Uses Groq llama-3.3-70b as judge (~15s for 10 questions).")
 
         st.markdown("---")
         st.markdown('<div class="panel-header">Metrics explained</div>', unsafe_allow_html=True)
@@ -779,106 +779,95 @@ with col_left:
                     st.error("All answers are empty — orchestrator is not returning responses.")
                     st.stop()
 
-                # ── Step 2: Score with official RAGAs + Gemini as judge ──
-                import os
-                from ragas import evaluate
-                from ragas.metrics import (
-                    faithfulness,
-                    answer_relevancy,
-                    context_precision,
-                    context_recall,
-                )
-                from ragas.llms import LangchainLLMWrapper
-                from ragas.embeddings import LangchainEmbeddingsWrapper
-                from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-                from datasets import Dataset
+                # ── Step 2: Score each question with Groq (1 call per question, ~15s total) ──
+                import os, re as _re
+                from groq import Groq
 
-                gemini_api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
-                if not gemini_api_key:
-                    st.error("⚠️ GEMINI_API_KEY not set. Add it to Streamlit secrets.")
-                    st.stop()
+                eval_api_key = st.secrets.get("GROQ_API_KEY_EVAL", os.getenv("GROQ_API_KEY_EVAL", ""))
+                if not eval_api_key:
+                    eval_api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
+                    st.caption("💡 Tip: Set GROQ_API_KEY_EVAL in secrets to use a separate quota for evaluation.")
 
-                os.environ["GOOGLE_API_KEY"] = gemini_api_key
+                eval_client = Groq(api_key=eval_api_key)
 
-                st.info("Scoring with RAGAs + Gemini judge — this may take a minute...")
+                SCORE_PROMPT = """You are a strict RAG evaluation judge. Score on a scale of 0.0 to 1.0.
 
-                # Wrap Gemini for RAGAs
-                gemini_llm = LangchainLLMWrapper(
-                    ChatGoogleGenerativeAI(
-                        model="gemini-1.5-flash",
-                        google_api_key=gemini_api_key,
-                        temperature=0,
-                    )
-                )
-                gemini_embeddings = LangchainEmbeddingsWrapper(
-                    GoogleGenerativeAIEmbeddings(
-                        model="models/embedding-001",
-                        google_api_key=gemini_api_key,
-                    )
-                )
+Question: {question}
+Answer: {answer}
+Retrieved Context: {context}
+Ground Truth: {ground_truth}
 
-                # Build RAGAs dataset
-                ragas_dataset = Dataset.from_dict({
-                    "question":   eval_questions,
-                    "answer":     eval_answers,
-                    "contexts":   eval_contexts,
-                    "ground_truth": eval_ground_truth,
-                })
+Reply with EXACTLY these 4 lines and nothing else:
+Faithfulness: 0.X
+Answer Relevancy: 0.X
+Context Precision: 0.X
+Context Recall: 0.X
 
-                # Configure metrics to use Gemini
-                metrics = [faithfulness, answer_relevancy, context_precision, context_recall]
-                for metric in metrics:
-                    metric.llm       = gemini_llm
-                    metric.embeddings = gemini_embeddings
+Scoring rules:
+- Faithfulness: is the answer grounded in the context? (1.0 = fully grounded, 0.0 = hallucinated)
+- Answer Relevancy: does the answer address the question? (1.0 = fully relevant, 0.0 = off-topic)
+- Context Precision: is the retrieved context relevant to the question? (1.0 = all relevant, 0.0 = irrelevant)
+- Context Recall: does the context contain enough info to answer correctly? (1.0 = complete, 0.0 = missing)"""
 
-                # Run RAGAs in a background thread with a hard wall-clock timeout
-                import asyncio
-                import threading
-                from ragas.run_config import RunConfig
+                def extract_score(pattern, text):
+                    m = _re.search(pattern, text, _re.IGNORECASE)
+                    if m:
+                        try:
+                            return max(0.0, min(1.0, float(m.group(1))))
+                        except Exception:
+                            pass
+                    return float("nan")
 
-                ragas_result_holder = {"result": None, "error": None}
+                st.info(f"Scoring {len(eval_questions)} questions with Groq judge...")
+                score_bar    = st.progress(0)
+                score_status = st.empty()
 
-                def run_ragas():
+                faithfulness_scores      = []
+                answer_relevancy_scores  = []
+                context_precision_scores = []
+                context_recall_scores    = []
+
+                for idx, (q, a, ctx, gt) in enumerate(zip(
+                    eval_questions, eval_answers, eval_contexts, eval_ground_truth
+                )):
+                    score_status.caption(f"Scoring [{idx+1}/{len(eval_questions)}] {q[:60]}...")
+                    context_text = " ".join(ctx)[:2000]
+
                     try:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        ragas_result_holder["result"] = evaluate(
-                            dataset=ragas_dataset,
-                            metrics=metrics,
-                            raise_exceptions=False,
-                            run_config=RunConfig(timeout=45, max_retries=1, max_wait=20),
+                        resp = eval_client.chat.completions.create(
+                            model="llama-3.3-70b-versatile",
+                            messages=[{"role": "user", "content": SCORE_PROMPT.format(
+                                question=q, answer=a[:800],
+                                context=context_text, ground_truth=gt
+                            )}],
+                            temperature=0,
+                            max_tokens=120,
                         )
+                        raw = resp.choices[0].message.content.strip()
+
+                        faithfulness_scores.append(extract_score(r"Faithfulness[\:\s]+([0-9.]+)", raw))
+                        answer_relevancy_scores.append(extract_score(r"Answer Relevancy[\:\s]+([0-9.]+)", raw))
+                        context_precision_scores.append(extract_score(r"Context Precision[\:\s]+([0-9.]+)", raw))
+                        context_recall_scores.append(extract_score(r"Context Recall[\:\s]+([0-9.]+)", raw))
+
                     except Exception as ex:
-                        ragas_result_holder["error"] = str(ex)
+                        ex_str = str(ex)
+                        if "429" in ex_str or "rate_limit" in ex_str.lower() or "tokens per day" in ex_str.lower():
+                            score_bar.empty()
+                            score_status.empty()
+                            wait_match = _re.search(r"try again in ([\d]+m[\d.]+s)", ex_str)
+                            wait_time  = wait_match.group(1) if wait_match else "a few hours"
+                            st.error(f"⚠️ Groq eval token limit reached. Try again in **{wait_time}**.")
+                            st.info("💡 Set GROQ_API_KEY_EVAL in secrets to keep eval quota separate from teaching.")
+                            st.stop()
+                        faithfulness_scores.append(float("nan"))
+                        answer_relevancy_scores.append(float("nan"))
+                        context_precision_scores.append(float("nan"))
+                        context_recall_scores.append(float("nan"))
 
-                MAX_WAIT_SECONDS = 60 * n_questions  # 60s per question max
-                ragas_thread = threading.Thread(target=run_ragas, daemon=True)
-                ragas_thread.start()
+                    score_bar.progress((idx + 1) / len(eval_questions))
 
-                # Show live timer while waiting
-                timer_slot = st.empty()
-                elapsed = 0
-                while ragas_thread.is_alive() and elapsed < MAX_WAIT_SECONDS:
-                    timer_slot.caption(f"⏳ RAGAs scoring... {elapsed}s elapsed (max {MAX_WAIT_SECONDS}s)")
-                    time.sleep(2)
-                    elapsed += 2
-
-                timer_slot.empty()
-
-                if ragas_thread.is_alive():
-                    st.error(f"⏰ RAGAs timed out after {MAX_WAIT_SECONDS}s. Try fewer questions or check your GEMINI_API_KEY quota.")
-                    st.stop()
-
-                if ragas_result_holder["error"]:
-                    st.error(f"RAGAs error: {ragas_result_holder['error']}")
-                    st.stop()
-
-                ragas_df = ragas_result_holder["result"].to_pandas()
-
-                faithfulness_scores      = ragas_df["faithfulness"].tolist()
-                answer_relevancy_scores  = ragas_df["answer_relevancy"].tolist()
-                context_precision_scores = ragas_df["context_precision"].tolist()
-                context_recall_scores    = ragas_df["context_recall"].tolist()
+                score_status.empty()
 
                 # ══════════════════════════════════════════════════
                 # OVERALL SCORES
