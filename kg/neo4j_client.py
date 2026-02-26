@@ -1,6 +1,7 @@
 # kg/neo4j_client.py
 # Neo4j connection and core operations
 # Updated to use Topic and Technique nodes from curriculum KG
+# Temporal: mastered_at timestamp written when node reaches green status
 
 from neo4j import GraphDatabase
 from config import KG_VISIBLE_THRESHOLD, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
@@ -19,6 +20,10 @@ class Neo4jClient:
       green  = mastered
       red    = needs review (failed 3+ times)
       orange = prerequisite gap
+
+    Temporal fields:
+      mastered_at = ISO timestamp when node first reached green (never overwritten)
+      updated_at  = ISO timestamp of last status change
     """
 
     def __init__(self):
@@ -60,38 +65,59 @@ class Neo4jClient:
         """
         Update status on a Topic node.
         Called by Solver (blue), Assessment (yellow), Feedback (green/red/orange).
+        Writes mastered_at when status becomes green — only set once, never overwritten.
         """
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
         cypher = """
         MATCH (t:Topic {name: $name})
-        SET t.status = $status
+        SET t.status = $status,
+            t.updated_at = $now
+        WITH t
+        WHERE $status = 'green' AND t.mastered_at IS NULL
+        SET t.mastered_at = $now
         RETURN t
         """
-        self.query(cypher, {"name": topic_name, "status": status})
+        self.query(cypher, {"name": topic_name, "status": status, "now": now})
 
     def update_technique_status(self, technique_name: str, status: str):
         """
         Update status on a Technique node.
         Called by Feedback Agent after detailed assessment.
+        Writes mastered_at when status becomes green — only set once, never overwritten.
         """
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
         cypher = """
         MATCH (t:Technique {name: $name})
-        SET t.status = $status
+        SET t.status = $status,
+            t.updated_at = $now
+        WITH t
+        WHERE $status = 'green' AND t.mastered_at IS NULL
+        SET t.mastered_at = $now
         RETURN t
         """
-        self.query(cypher, {"name": technique_name, "status": status})
+        self.query(cypher, {"name": technique_name, "status": status, "now": now})
 
     def update_node_status(self, name: str, status: str):
         """
-        Update status on either Topic or Technique — tries Topic first, then Technique.
+        Update status on either Topic or Technique — tries both.
         Used by agents that don't distinguish between node types.
+        Writes mastered_at when status becomes green — only set once, never overwritten.
         """
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
         cypher = """
         MATCH (n)
         WHERE (n:Topic OR n:Technique) AND n.name = $name
-        SET n.status = $status
+        SET n.status = $status,
+            n.updated_at = $now
+        WITH n
+        WHERE $status = 'green' AND n.mastered_at IS NULL
+        SET n.mastered_at = $now
         RETURN n
         """
-        self.query(cypher, {"name": name, "status": status})
+        self.query(cypher, {"name": name, "status": status, "now": now})
 
     # ── Prerequisite checks ────────────────────────
 
@@ -274,12 +300,51 @@ class Neo4jClient:
         """)
         return [r["name"] for r in results]
 
+    # ── Temporal — learning progression ───────────
+
+    def get_mastery_timeline(self) -> list[dict]:
+        """
+        Returns all mastered nodes ordered by mastered_at timestamp.
+        Used to show the student's learning progression over time.
+        Returns: [{name, node_type, mastered_at}, ...]
+        """
+        return self.query("""
+            MATCH (n)
+            WHERE (n:Topic OR n:Technique)
+              AND n.status = 'green'
+              AND n.mastered_at IS NOT NULL
+            RETURN n.name        AS name,
+                   labels(n)[0]  AS node_type,
+                   n.mastered_at AS mastered_at
+            ORDER BY n.mastered_at ASC
+        """)
+
+    def sync_mastery_from_letta(self, mastered_concepts: list[str]):
+        """
+        Backfill mastery from Letta into Neo4j for concepts mastered
+        in previous sessions where mastered_at was not recorded.
+        Uses a sentinel timestamp so timeline shows these as 'before current session'.
+        Only writes to nodes that are not already green.
+        """
+        from datetime import datetime, timezone
+        sentinel = "2000-01-01T00:00:00+00:00"  # clearly historical
+        for name in mastered_concepts:
+            self.query("""
+                MATCH (n)
+                WHERE (n:Topic OR n:Technique) AND n.name = $name
+                  AND coalesce(n.status, 'grey') <> 'green'
+                SET n.status = 'green',
+                    n.mastered_at = $ts,
+                    n.updated_at  = $ts
+            """, {"name": name, "ts": sentinel})
+
     # ── Frontend export ────────────────────────────
 
     def to_cytoscape_json(self) -> dict:
         """
         Convert curriculum KG to Cytoscape.js format for Streamlit frontend.
         Shows Topic nodes as large circles, Technique nodes as smaller ones.
+        Includes mastered_at in node data for tooltip display.
         """
         status_colors = {
             "grey":   "#9CA3AF",
@@ -295,6 +360,7 @@ class Neo4jClient:
             MATCH (t:Topic)
             RETURN t.name as name,
                    coalesce(t.status, 'grey') as status,
+                   t.mastered_at as mastered_at,
                    'topic' as node_type
         """)
 
@@ -303,6 +369,7 @@ class Neo4jClient:
             MATCH (t:Technique)
             RETURN t.name as name,
                    coalesce(t.status, 'grey') as status,
+                   t.mastered_at as mastered_at,
                    'technique' as node_type
         """)
 
@@ -317,31 +384,48 @@ class Neo4jClient:
 
         cytoscape_nodes = []
 
-        # Topic nodes — larger size
         for node in topics:
-            status = node.get("status", "grey")
+            status      = node.get("status", "grey")
+            mastered_at = node.get("mastered_at")
+            # Format mastered_at for tooltip — show date only
+            mastered_label = ""
+            if mastered_at and mastered_at != "2000-01-01T00:00:00+00:00":
+                mastered_label = f" · mastered {mastered_at[:10]}"
+            elif mastered_at:
+                mastered_label = " · mastered (previous session)"
+
             cytoscape_nodes.append({
                 "data": {
-                    "id":        node["name"].lower().replace(" ", "_"),
-                    "label":     node["name"],
-                    "status":    status,
-                    "color":     status_colors.get(status, "#9CA3AF"),
-                    "node_type": "topic",
-                    "difficulty": "intermediate"
+                    "id":          node["name"].lower().replace(" ", "_"),
+                    "label":       node["name"],
+                    "status":      status,
+                    "color":       status_colors.get(status, "#9CA3AF"),
+                    "node_type":   "topic",
+                    "mastered_at": mastered_at or "",
+                    "tooltip":     f"{node['name']}{mastered_label}",
+                    "difficulty":  "intermediate"
                 }
             })
 
-        # Technique nodes — smaller size
         for node in techniques:
-            status = node.get("status", "grey")
+            status      = node.get("status", "grey")
+            mastered_at = node.get("mastered_at")
+            mastered_label = ""
+            if mastered_at and mastered_at != "2000-01-01T00:00:00+00:00":
+                mastered_label = f" · mastered {mastered_at[:10]}"
+            elif mastered_at:
+                mastered_label = " · mastered (previous session)"
+
             cytoscape_nodes.append({
                 "data": {
-                    "id":        node["name"].lower().replace(" ", "_"),
-                    "label":     node["name"],
-                    "status":    status,
-                    "color":     status_colors.get(status, "#9CA3AF"),
-                    "node_type": "technique",
-                    "difficulty": "beginner"
+                    "id":          node["name"].lower().replace(" ", "_"),
+                    "label":       node["name"],
+                    "status":      status,
+                    "color":       status_colors.get(status, "#9CA3AF"),
+                    "node_type":   "technique",
+                    "mastered_at": mastered_at or "",
+                    "tooltip":     f"{node['name']}{mastered_label}",
+                    "difficulty":  "beginner"
                 }
             })
 
