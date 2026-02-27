@@ -141,7 +141,11 @@ Rules:
 - Answer in 2-5 sentences maximum — give the key insight immediately
 - Be direct — give a verdict or clear recommendation, don't hedge
 - No bullet points, headers, or code blocks
-- At the very end, ask: "Would you like a detailed comparison with code examples?"
+- At the very end, ask ONE specific question based on what would help most:
+  - If it's a comparison: "Would you like a deeper comparison with code examples for both?"
+  - If it's a recommendation: "Would you like me to show you how to implement this with code?"
+  - If it's a project: "Would you like a full project roadmap with code snippets?"
+  - Default: "Would you like a deeper explanation with code examples?"
 """
 
 FOLLOWUP_PROMPT = """
@@ -401,7 +405,8 @@ Student question: {message}"""
             concept = self._extract_concept(state["message"])
             if concept:
                 self.pending_concept = concept
-                self.pending_message = state["message"]
+                # Store original message + explicit instruction to include code
+                self.pending_message = state["message"] + " — include detailed code examples and step by step explanation"
                 self.pending_intent  = "solver"
         except Exception as e:
             response = f"Something went wrong: {e}"
@@ -422,7 +427,8 @@ Student question: {message}"""
             concept = self._extract_concept(state["message"])
             if concept:
                 self.pending_concept = concept
-                self.pending_message = state["message"]
+                # Store original message + explicit instruction to include code
+                self.pending_message = state["message"] + " — include detailed code examples"
                 self.pending_intent  = "recommender"
         except Exception as e:
             response = f"Something went wrong: {e}"
