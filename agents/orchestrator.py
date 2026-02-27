@@ -113,6 +113,12 @@ You are MOSAIC, a friendly AI tutor specialising in data science.
 
 Give a SHORT, conversational answer to the student's question.
 
+CRITICAL: You will be given recent conversation history and retrieved documentation.
+- Use the conversation history to resolve abbreviations (e.g. if "TFT" was mentioned as
+  "Temporal Fusion Transformer" earlier, treat it as such — never guess from training knowledge)
+- Use the retrieved documentation as your primary source of truth
+- If the documentation says something different from your training knowledge, trust the documentation
+
 Rules:
 - Answer in 2-5 sentences maximum
 - Be warm, clear, and direct
@@ -124,6 +130,12 @@ BRIEF_RECOMMENDER_PROMPT = """
 You are MOSAIC, a friendly AI tutor specialising in data science.
 
 Give a SHORT, conversational answer that directly addresses the comparison or recommendation.
+
+CRITICAL: You will be given recent conversation history and retrieved documentation.
+- Use the conversation history to resolve abbreviations (e.g. if "TFT" was mentioned as
+  "Temporal Fusion Transformer" earlier, treat it as such — never guess from training knowledge)
+- Use the retrieved documentation as your primary source of truth
+- If the documentation says something different from your training knowledge, trust the documentation
 
 Rules:
 - Answer in 2-5 sentences maximum — give the key insight immediately
@@ -349,12 +361,42 @@ class Orchestrator:
             response = f"Hey! Something went wrong: {e}"
         return {**state, "response": response, "agent_used": "Solver"}
 
-    def _run_brief_answer(self, state: TutorState) -> TutorState:
-        """Brief answer → store pending for Solver follow-up."""
+    def _build_brief_context(self, message: str, history: list, retriever_fn) -> str:
+        """Build user_message with RAG context + history for brief answers."""
+        # Fetch RAG
         try:
+            rag_docs    = retriever_fn(message)
+            rag_context = "\n\n".join([d["text"] for d in rag_docs[:3]]) if rag_docs else ""
+        except Exception:
+            rag_context = ""
+
+        # Format history
+        history_text = ""
+        if history:
+            turns = []
+            for m in history[-6:]:
+                role = "Student" if m["role"] == "user" else "Tutor"
+                turns.append(f"{role}: {m['content'][:200]}")
+            history_text = "Recent conversation:\n" + "\n".join(turns)
+
+        return f"""{history_text}
+
+Retrieved documentation:
+{rag_context if rag_context else "No documentation retrieved."}
+
+Student question: {message}"""
+
+    def _run_brief_answer(self, state: TutorState) -> TutorState:
+        """Brief answer with RAG + history → store pending for Solver follow-up."""
+        try:
+            user_message = self._build_brief_context(
+                state["message"],
+                state.get("history", []),
+                self.solver.retriever.retrieve_for_solver
+            )
             response = self.llm.generate(
                 system_prompt=BRIEF_ANSWER_PROMPT,
-                user_message=state["message"]
+                user_message=user_message
             )
             concept = self._extract_concept(state["message"])
             if concept:
@@ -366,11 +408,16 @@ class Orchestrator:
         return {**state, "response": response, "agent_used": "Solver"}
 
     def _run_brief_recommend(self, state: TutorState) -> TutorState:
-        """Brief recommendation → store pending for Recommender follow-up."""
+        """Brief recommendation with RAG + history → store pending for Recommender follow-up."""
         try:
+            user_message = self._build_brief_context(
+                state["message"],
+                state.get("history", []),
+                self.recommender.retriever.retrieve_for_recommender
+            )
             response = self.llm.generate(
                 system_prompt=BRIEF_RECOMMENDER_PROMPT,
-                user_message=state["message"]
+                user_message=user_message
             )
             concept = self._extract_concept(state["message"])
             if concept:
