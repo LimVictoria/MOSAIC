@@ -81,8 +81,7 @@ section[data-testid="collapsedControl"] { visibility: visible !important; displa
 .tag-solver     { background: #DBEAFE; color: #1D4ED8; border: 1px solid #93C5FD; }
 .tag-assessment { background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; }
 .tag-feedback   { background: #F3E8FF; color: #6B21A8; border: 1px solid #D8B4FE; }
-.tag-system      { background: #DCFCE7; color: #166534; border: 1px solid #86EFAC; }
-.tag-recommender { background: #FFF7ED; color: #C2410C; border: 1px solid #FDBA74; }
+.tag-system     { background: #DCFCE7; color: #166534; border: 1px solid #86EFAC; }
 .panel-header {
     font-size: 0.6rem;
     font-weight: 700;
@@ -146,7 +145,6 @@ def load_components():
     from rag.retriever import RAGRetriever
     from kg.neo4j_client import Neo4jClient
     from agents.solver_agent import SolverAgent
-    from agents.recommender_agent import RecommenderAgent
     from agents.assessment_agent import AssessmentAgent
     from agents.feedback_agent import FeedbackAgent
     from agents.orchestrator import Orchestrator
@@ -157,13 +155,12 @@ def load_components():
     neo4j        = Neo4jClient()
     letta        = LettaClient()
     solver       = SolverAgent(llm, retriever, neo4j, letta)
-    recommender  = RecommenderAgent(llm, retriever, neo4j, letta)
     assessment   = AssessmentAgent(llm, retriever, neo4j, letta)
     feedback     = FeedbackAgent(llm, retriever, neo4j, letta)
-    orchestrator = Orchestrator(solver, recommender, assessment, feedback, neo4j, letta)
+    orchestrator = Orchestrator(solver, assessment, feedback, neo4j, letta)
     return {
         "llm": llm, "embedder": embedder, "retriever": retriever, "neo4j": neo4j, "letta": letta,
-        "solver": solver, "recommender": recommender, "assessment": assessment,
+        "solver": solver, "assessment": assessment,
         "feedback": feedback, "orchestrator": orchestrator,
     }
 
@@ -190,11 +187,10 @@ STATUS_LABELS = {
     "green": "Mastered ✓", "red": "Needs review", "orange": "Prereq gap",
 }
 AGENT_TAGS = {
-    "Solver":      ("SOLVER",    "tag-solver"),
-    "Recommender": ("RECOMMEND", "tag-recommender"),
-    "Assessment":  ("ASSESS",    "tag-assessment"),
-    "Feedback":    ("FEEDBACK",  "tag-feedback"),
-    "System":      ("SYSTEM",    "tag-system"),
+    "Solver":     ("SOLVER",   "tag-solver"),
+    "Assessment": ("ASSESS",   "tag-assessment"),
+    "Feedback":   ("FEEDBACK", "tag-feedback"),
+    "System":     ("SYSTEM",   "tag-system"),
 }
 
 # ─────────────────────────────────────────────────────
@@ -207,23 +203,18 @@ for key, val in {
     "kg_data": None, "kg_visible": False, "last_kg_refresh": 0,
     "response_style": "Balanced", "difficulty_override": "Auto",
     "ingestion_done": False,
+    "kg_view": "FODS Curriculum",       # which KG to show in sidebar
+    "ts_kg_subview": "pipeline",        # sub-view for Time Series KG
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
-# Run ingestion in background thread so Streamlit starts immediately
-# Avoids 60s health check timeout on cold boot with large document sets
+# Run ingestion once per session — after session state is initialised
 if COMPONENTS_LOADED and not st.session_state["ingestion_done"]:
-    import threading
-    def _ingest_background():
-        try:
-            from rag.fetch_docs import run_ingestion
-            run_ingestion()
-        except Exception as e:
-            print(f"Background ingestion error: {e}")
-    thread = threading.Thread(target=_ingest_background, daemon=True)
-    thread.start()
-    st.session_state["ingestion_done"] = True  # mark done immediately so it only starts once
+    with st.spinner("Checking knowledge base..."):
+        from rag.fetch_docs import run_ingestion
+        run_ingestion()
+    st.session_state["ingestion_done"] = True
 
 # ─────────────────────────────────────────────────────
 # Agent helpers
@@ -232,14 +223,8 @@ def call_chat(message: str) -> dict:
     if not COMPONENTS_LOADED:
         return {"response": f"Error: {LOAD_ERROR}", "agent": "System"}
     try:
-        orch    = components["orchestrator"]
-        recent  = st.session_state.messages[-6:] if st.session_state.messages else []
-        history = [{"role": m["role"], "content": m["content"]} for m in recent]
-        response = orch.route(
-            student_id=st.session_state.student_id,
-            message=message,
-            history=history
-        )
+        orch     = components["orchestrator"]
+        response = orch.route(student_id=st.session_state.student_id, message=message)
         return {"response": response, "agent": orch.last_agent_used}
     except Exception as e:
         return {"response": f"Agent error: {e}", "agent": "System"}
@@ -280,7 +265,12 @@ def get_kg_data() -> dict:
     if not COMPONENTS_LOADED:
         return {"elements": {"nodes": [], "edges": []}, "node_count": 0, "visible": False}
     try:
-        return components["neo4j"].to_cytoscape_json()
+        kg_view = st.session_state.get("kg_view", "FODS Curriculum")
+        if kg_view == "FODS Curriculum":
+            return components["neo4j"].to_cytoscape_json()
+        else:
+            subview = st.session_state.get("ts_kg_subview", "pipeline")
+            return components["neo4j"].to_cytoscape_json_pipeline(view=subview)
     except Exception:
         return {"elements": {"nodes": [], "edges": []}, "node_count": 0, "visible": False}
 
@@ -398,40 +388,85 @@ st.markdown("---")
 # SIDEBAR — Knowledge Graph
 # ─────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown('<div class="panel-header">Knowledge Graph</div>', unsafe_allow_html=True)
+    # KG type label with current view
+    kg_view = st.session_state.get("kg_view", "FODS Curriculum")
+    kg_label = "Knowledge Graph" if kg_view == "FODS Curriculum" else "Time Series KG"
+    st.markdown(f'<div class="panel-header">{kg_label}</div>', unsafe_allow_html=True)
 
+    # Force refresh when kg_view changes
     now = time.time()
-    if now - st.session_state.last_kg_refresh > 5:
+    last_view = st.session_state.get("_last_kg_view", "")
+    view_changed = last_view != kg_view
+    if view_changed or now - st.session_state.last_kg_refresh > 5:
         kg                               = get_kg_data()
         st.session_state.kg_data         = kg
         st.session_state.kg_visible      = kg.get("visible", False)
         st.session_state.last_kg_refresh = now
+        st.session_state["_last_kg_view"] = kg_view
 
     node_count = st.session_state.kg_data.get("node_count", 0) if st.session_state.kg_data else 0
-    st.caption(f"🕸️ {node_count} curriculum nodes")
 
-    if st.session_state.kg_data and st.session_state.kg_data.get("node_count", 0) > 0:
+    # Show different info depending on active KG
+    if kg_view == "FODS Curriculum":
+        st.caption(f"🕸️ {node_count} curriculum nodes")
+        if st.session_state.kg_data and node_count > 0:
+            leg_cols = st.columns(2)
+            for i, (status, slabel) in enumerate(STATUS_LABELS.items()):
+                with leg_cols[i % 2]:
+                    st.markdown(
+                        f'<div style="display:flex;align-items:center;gap:0.25rem;margin-bottom:0.4rem">' +
+                        f'<div style="width:8px;height:8px;border-radius:50%;' +
+                        f'background:{STATUS_COLORS[status]};flex-shrink:0"></div>' +
+                        f'<span style="font-size:0.57rem;color:#64748B;white-space:nowrap">{slabel}</span></div>',
+                        unsafe_allow_html=True)
+            render_kg(st.session_state.kg_data, height=420)
+            st.caption("💡 Right-click → Save image as... to export PNG")
+        else:
+            st.markdown("""
+            <div style="text-align:center;padding:2rem 1rem;color:#94A3B8">
+                <div style="font-size:1.8rem">🕸️</div>
+                <div style="font-size:0.72rem;margin-top:0.5rem">
+                Curriculum graph loading...<br>Graph appears after 2+ concepts are indexed
+                </div>
+            </div>""", unsafe_allow_html=True)
+    else:
+        # Time Series KG
+        ts_view = st.session_state.get("ts_kg_subview", "pipeline")
+        view_labels = {
+            "pipeline": "Pipeline (9 stages)",
+            "models":   "Stages + Models",
+            "concepts": "Concepts",
+            "full":     "Full graph",
+        }
+        st.caption(f"🕸️ {node_count} nodes · {view_labels.get(ts_view, ts_view)}")
+
+        # Node type color legend for TS KG
+        ts_legend = [
+            ("#0284C7", "Pipeline Stage"),
+            ("#7C3AED", "Model"),
+            ("#059669", "Concept"),
+            ("#D97706", "Eval Metric"),
+        ]
         leg_cols = st.columns(2)
-        for i, (status, slabel) in enumerate(STATUS_LABELS.items()):
+        for i, (color, label) in enumerate(ts_legend):
             with leg_cols[i % 2]:
                 st.markdown(
-                    f'<div style="display:flex;align-items:center;gap:0.25rem;margin-bottom:0.4rem">'
-                    f'<div style="width:8px;height:8px;border-radius:50%;'
-                    f'background:{STATUS_COLORS[status]};flex-shrink:0"></div>'
-                    f'<span style="font-size:0.57rem;color:#64748B;white-space:nowrap">{slabel}</span></div>',
+                    f'<div style="display:flex;align-items:center;gap:0.25rem;margin-bottom:0.4rem">' +
+                    f'<div style="width:8px;height:8px;border-radius:50%;background:{color};flex-shrink:0"></div>' +
+                    f'<span style="font-size:0.57rem;color:#64748B;white-space:nowrap">{label}</span></div>',
                     unsafe_allow_html=True)
 
-        render_kg(st.session_state.kg_data, height=420)
-        st.caption("💡 Right-click → Save image as... to export PNG")
-    else:
-        st.markdown("""
-        <div style="text-align:center;padding:2rem 1rem;color:#94A3B8">
-            <div style="font-size:1.8rem">🕸️</div>
-            <div style="font-size:0.72rem;margin-top:0.5rem">
-            Curriculum graph loading...
-                Graph appears after 2+ concepts are indexed
-            </div>
-        </div>""", unsafe_allow_html=True)
+        if st.session_state.kg_data and node_count > 0:
+            render_kg(st.session_state.kg_data, height=420)
+            st.caption("💡 Change view in ⚙️ Settings → Knowledge Graph")
+        else:
+            st.markdown("""
+            <div style="text-align:center;padding:2rem 1rem;color:#94A3B8">
+                <div style="font-size:1.8rem">🔬</div>
+                <div style="font-size:0.72rem;margin-top:0.5rem">
+                Time Series KG not loaded yet.<br>Push the Cypher script to Neo4j first.
+                </div>
+            </div>""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────
 # MAIN LAYOUT
@@ -442,7 +477,7 @@ col_left, col_right = st.columns([1, 1.8], gap="large")
 # LEFT — Input & Controls
 # ══════════════════════════════════════════════════════
 with col_left:
-    tab_chat, tab_assess, tab_settings, tab_eval = st.tabs(["💬 Learn", "📝 Assessment", "⚙️ Settings", "🧪 Evaluation"])
+    tab_chat, tab_assess, tab_settings, tab_eval = st.tabs(["💬 Chat", "📝 Assessment", "⚙️ Settings", "🧪 Evaluation"])
 
     # ── CHAT ──
     with tab_chat:
@@ -603,6 +638,46 @@ with col_left:
             label_visibility="collapsed"
         )
         st.caption("Auto uses your learning history to set the level.")
+
+        st.markdown("---")
+        st.markdown('<div class="panel-header">Knowledge Graph View</div>', unsafe_allow_html=True)
+        st.caption("Switch which graph is shown in the sidebar.")
+
+        kg_view_options = ["FODS Curriculum", "Time Series Pipeline"]
+        current_kg_view = st.session_state.get("kg_view", "FODS Curriculum")
+        new_kg_view = st.selectbox(
+            "Select knowledge graph",
+            kg_view_options,
+            index=kg_view_options.index(current_kg_view),
+            label_visibility="collapsed",
+            key="kg_view_selector"
+        )
+        if new_kg_view != current_kg_view:
+            st.session_state["kg_view"] = new_kg_view
+            st.session_state["last_kg_refresh"] = 0  # force sidebar refresh
+            st.rerun()
+
+        # Sub-view selector — only shown for Time Series KG
+        if st.session_state.get("kg_view") == "Time Series Pipeline":
+            ts_subview_options = {
+                "pipeline": "🔷 Pipeline stages only (9 nodes)",
+                "models":   "🤖 Stages + Models",
+                "concepts": "💡 Concepts map",
+                "full":     "🌐 Full graph (heavy)",
+            }
+            current_subview = st.session_state.get("ts_kg_subview", "pipeline")
+            new_subview = st.selectbox(
+                "Time Series KG detail level",
+                list(ts_subview_options.keys()),
+                format_func=lambda k: ts_subview_options[k],
+                index=list(ts_subview_options.keys()).index(current_subview),
+                label_visibility="collapsed",
+                key="ts_subview_selector"
+            )
+            if new_subview != current_subview:
+                st.session_state["ts_kg_subview"] = new_subview
+                st.session_state["last_kg_refresh"] = 0  # force sidebar refresh
+                st.rerun()
 
         st.markdown("---")
         st.markdown('<div class="panel-header">Export</div>', unsafe_allow_html=True)
