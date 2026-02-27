@@ -81,7 +81,8 @@ section[data-testid="collapsedControl"] { visibility: visible !important; displa
 .tag-solver     { background: #DBEAFE; color: #1D4ED8; border: 1px solid #93C5FD; }
 .tag-assessment { background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; }
 .tag-feedback   { background: #F3E8FF; color: #6B21A8; border: 1px solid #D8B4FE; }
-.tag-system     { background: #DCFCE7; color: #166534; border: 1px solid #86EFAC; }
+.tag-system      { background: #DCFCE7; color: #166534; border: 1px solid #86EFAC; }
+.tag-recommender { background: #FFF7ED; color: #C2410C; border: 1px solid #FDBA74; }
 .panel-header {
     font-size: 0.6rem;
     font-weight: 700;
@@ -145,7 +146,6 @@ def load_components():
     from rag.retriever import RAGRetriever
     from kg.neo4j_client import Neo4jClient
     from agents.solver_agent import SolverAgent
-    from agents.recommender_agent import RecommenderAgent
     from agents.assessment_agent import AssessmentAgent
     from agents.feedback_agent import FeedbackAgent
     from agents.orchestrator import Orchestrator
@@ -156,13 +156,12 @@ def load_components():
     neo4j        = Neo4jClient()
     letta        = LettaClient()
     solver       = SolverAgent(llm, retriever, neo4j, letta)
-    recommender  = RecommenderAgent(llm, retriever, neo4j, letta)
     assessment   = AssessmentAgent(llm, retriever, neo4j, letta)
     feedback     = FeedbackAgent(llm, retriever, neo4j, letta)
-    orchestrator = Orchestrator(solver, recommender, assessment, feedback, neo4j, letta)
+    orchestrator = Orchestrator(solver, assessment, feedback, neo4j, letta)
     return {
         "llm": llm, "embedder": embedder, "retriever": retriever, "neo4j": neo4j, "letta": letta,
-        "solver": solver, "recommender": recommender, "assessment": assessment,
+        "solver": solver, "assessment": assessment,
         "feedback": feedback, "orchestrator": orchestrator,
     }
 
@@ -189,10 +188,11 @@ STATUS_LABELS = {
     "green": "Mastered ✓", "red": "Needs review", "orange": "Prereq gap",
 }
 AGENT_TAGS = {
-    "Solver":     ("SOLVER",   "tag-solver"),
-    "Assessment": ("ASSESS",   "tag-assessment"),
-    "Feedback":   ("FEEDBACK", "tag-feedback"),
-    "System":     ("SYSTEM",   "tag-system"),
+    "Solver":      ("SOLVER",    "tag-solver"),
+    "Recommender": ("RECOMMEND", "tag-recommender"),
+    "Assessment":  ("ASSESS",    "tag-assessment"),
+    "Feedback":    ("FEEDBACK",  "tag-feedback"),
+    "System":      ("SYSTEM",    "tag-system"),
 }
 
 # ─────────────────────────────────────────────────────
@@ -456,10 +456,30 @@ with col_left:
         # Shows topics student hasn't mastered yet, starting from prerequisites
         def get_quick_topics() -> list[str]:
             """
-            Return suggested topics based on student progress.
-            Prioritises unmastered prerequisite topics first.
-            Falls back to curriculum starting topics if nothing in memory.
+            Return suggested topics based on which KG is active.
+            FODS KG:        prioritises unmastered prerequisite topics from curriculum.
+            Time Series KG: returns pipeline stage entry-point questions.
+            Falls back to hardcoded defaults if nothing loads.
             """
+            kg_view = st.session_state.get("kg_view", "FODS Curriculum")
+
+            # ── Time Series KG suggestions ──────────────────────────────────
+            if kg_view == "Time Series Pipeline":
+                # Static prompts covering each pipeline stage in order
+                return [
+                    "What does the data ingestion stage involve for time series?",
+                    "How do I perform EDA on time series data?",
+                    "What preprocessing steps are needed for time series?",
+                    "What is temporal train-test splitting and why does it matter?",
+                    "What data augmentation techniques work for time series?",
+                    "What feature engineering methods are used in time series?",
+                    "How do I choose between LSTM, TFT, and N-BEATS?",
+                    "What metrics should I use to evaluate a time series model?",
+                    "What are common anti-patterns in time series modelling?",
+                    "How do I deploy a time series forecasting model?",
+                ][:6]
+
+            # ── FODS Curriculum KG suggestions ──────────────────────────────
             default_topics = [
                 "How do I read a CSV file in Python?",
                 "What is a DataFrame?",
@@ -473,13 +493,10 @@ with col_left:
             try:
                 mastered = components["letta"].get_mastered_concepts(
                     st.session_state.student_id)
-                # Get next recommended topic from curriculum KG
                 next_topic = components["neo4j"].get_next_recommended_topic()
-                # Get unmastered prerequisites for next topic
                 unmastered = components["neo4j"].get_unmastered_prerequisites(
                     next_topic) if next_topic else []
 
-                # Build prompt suggestions from unmastered topics
                 topic_to_prompt = {
                     "Python for Data Science":     "What Python libraries do I need for data science?",
                     "Reading Structured Files":    "How do I read a CSV file in Python?",
@@ -495,18 +512,13 @@ with col_left:
                 }
 
                 suggestions = []
-                # Add unmastered prereqs first (most important)
                 for topic in unmastered:
                     if topic in topic_to_prompt and topic not in mastered:
                         suggestions.append(topic_to_prompt[topic])
-
-                # Add next recommended topic
                 if next_topic and next_topic in topic_to_prompt:
                     prompt = topic_to_prompt[next_topic]
                     if prompt not in suggestions:
                         suggestions.append(prompt)
-
-                # Fill remaining slots with unmastered topics in order
                 for topic, prompt in topic_to_prompt.items():
                     if len(suggestions) >= 6:
                         break
@@ -518,8 +530,9 @@ with col_left:
                 return default_topics
 
         quick_prompts = get_quick_topics()
-
-        st.markdown('<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:0.5rem">Suggested topics</div>', unsafe_allow_html=True)
+        kg_view = st.session_state.get("kg_view", "FODS Curriculum")
+        suggested_label = "Suggested topics" if kg_view == "FODS Curriculum" else "Time series topics"
+        st.markdown(f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:0.5rem">{suggested_label}</div>', unsafe_allow_html=True)
         qc1, qc2 = st.columns(2)
         for i, prompt in enumerate(quick_prompts):
             col = qc1 if i % 2 == 0 else qc2
