@@ -60,23 +60,90 @@ ABBREVIATION_MAP = {
 }
 
 
+# Common English words to never fuzzy-correct
+_COMMON_WORDS = {
+    "the","and","for","are","but","not","you","all","can","has","her","was","one",
+    "our","out","day","get","him","his","how","its","may","new","now","old","see",
+    "two","who","did","yes","use","way","she","had","let","put","say","too","vs",
+    "or","to","in","is","it","if","of","on","at","as","an","a","test","from","good",
+    "data","with","this","that","have","then","when","what","will","each","they",
+    "been","than","more","some","time","very","also","both","such","like","just",
+    "does","show","give","make","tell","need","want","help","code","work","used",
+    "using","which","where","after","before","between","difference","better",
+}
+
+
+def _levenshtein(a: str, b: str) -> int:
+    m, n = len(a), len(b)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    for i in range(m + 1): dp[i][0] = i
+    for j in range(n + 1): dp[0][j] = j
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            dp[i][j] = min(dp[i-1][j] + 1, dp[i][j-1] + 1, dp[i-1][j-1] + cost)
+    return dp[m][n]
+
+
+def _looks_like_abbreviation(word: str) -> bool:
+    if word in _COMMON_WORDS:
+        return False
+    vowels = sum(1 for c in word if c in "aeiou")
+    if len(word) <= 6 and vowels <= 1:
+        return True
+    if len(word) <= 7 and vowels <= 2:
+        return True
+    return False
+
+
+def correct_typos(query: str) -> str:
+    known_abbrevs = list(ABBREVIATION_MAP.keys())
+    words         = query.split()
+    corrected     = []
+    for word in words:
+        clean = word.lower().strip(".,?!")
+        if clean in _COMMON_WORDS:
+            corrected.append(word)
+            continue
+        max_dist   = 2 if _looks_like_abbreviation(clean) else 1
+        best_match = None
+        best_dist  = max_dist + 1
+        for abbrev in known_abbrevs:
+            if abs(len(clean) - len(abbrev)) > max_dist:
+                continue
+            dist = _levenshtein(clean, abbrev)
+            if dist < best_dist:
+                best_dist  = dist
+                best_match = abbrev
+        if best_match and best_dist <= max_dist and best_match != clean:
+            print(f"Typo corrected: '{clean}' -> '{best_match}'")
+            corrected.append(best_match)
+        else:
+            corrected.append(word)
+    return " ".join(corrected)
+
+
 def expand_query(query: str) -> str:
     """
-    Expand abbreviations in a query to their full form before embedding.
-    Ensures Pinecone retrieves the right chunks instead of matching
-    unrelated content that shares the same abbreviation.
+    1. Correct typos (e.g. "tgt" → "tft")
+    2. Expand abbreviations (e.g. "tft" → "Temporal Fusion Transformer...")
+    3. Append original query for hybrid matching
 
-    e.g. "TFT vs 1D CNN-LSTM" →
+    e.g. "tgt vs 1D CNN-LSTM" →
          "Temporal Fusion Transformer time series forecasting vs
-          1D Convolutional Neural Network Long Short-Term Memory (TFT vs 1D CNN-LSTM)"
+          1D Convolutional Neural Network Long Short-Term Memory (tgt vs 1D CNN-LSTM)"
     """
-    expanded = query
+    # Step 1: fix typos first
+    corrected = correct_typos(query)
+
+    # Step 2: expand abbreviations
+    expanded = corrected
     for abbrev, full in ABBREVIATION_MAP.items():
         pattern = re.compile(r'\b' + re.escape(abbrev) + r'\b', re.IGNORECASE)
         if pattern.search(expanded):
             expanded = pattern.sub(full, expanded)
 
-    # Append original query for hybrid matching
+    # Step 3: append original query for hybrid matching
     if expanded != query:
         expanded = f"{expanded} ({query})"
 
