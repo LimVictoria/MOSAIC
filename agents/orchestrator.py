@@ -9,6 +9,7 @@ from typing import TypedDict
 class TutorState(TypedDict):
     student_id:        str
     message:           str
+    history:           list   # recent conversation turns for context
     intent:            str
     concept:           str
     response:          str
@@ -218,10 +219,11 @@ class Orchestrator:
 
         return workflow.compile()
 
-    def route(self, student_id: str, message: str) -> str:
+    def route(self, student_id: str, message: str, history: list = None) -> str:
         state = {
             "student_id":        student_id,
             "message":           message,
+            "history":           history or [],
             "intent":            "",
             "concept":           "",
             "response":          "",
@@ -385,7 +387,8 @@ class Orchestrator:
             student_id=state["student_id"],
             concept=state["concept"],
             focus=state.get("re_teach_focus") or None,
-            message=state["message"]
+            message=state["message"],
+            history=state.get("history", [])
         )
         return {**state, "response": response, "agent_used": "Solver"}
 
@@ -394,7 +397,8 @@ class Orchestrator:
         response = self.recommender.recommend(
             student_id=state["student_id"],
             message=state["message"],
-            mode="auto"
+            mode="auto",
+            history=state.get("history", [])
         )
         return {**state, "response": response, "agent_used": "Recommender"}
 
