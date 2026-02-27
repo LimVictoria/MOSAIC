@@ -1,0 +1,442 @@
+// ═══════════════════════════════════════════════════════════════
+// MOSAIC Curriculum Knowledge Graph
+// ═══════════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────
+// TOPIC NODES
+// ─────────────────────────────────────────
+CREATE (python:Topic {
+    name: "Python for Data Science",
+    difficulty: "Beginner",
+    estimated_hours: 40,
+    description: "End-to-end data science workflow using Python",
+    learning_objective: "Build a complete data preprocessing and ML pipeline"
+})
+CREATE (fileReading:Topic {
+    name: "Reading Structured Files",
+    difficulty: "Beginner",
+    estimated_hours: 3,
+    description: "Loading structured data from various file formats into Python",
+    learning_objective: "Read CSV, Excel, and JSON files into pandas DataFrames"
+})
+CREATE (dataTypes:Topic {
+    name: "Structured Data Types",
+    difficulty: "Beginner",
+    estimated_hours: 4,
+    description: "Understanding core data structures used in data science",
+    learning_objective: "Distinguish and apply DataFrames, arrays, tensors, and SQL tables"
+})
+CREATE (eda:Topic {
+    name: "Exploratory Data Analysis",
+    difficulty: "Intermediate",
+    estimated_hours: 6,
+    description: "Analyzing datasets to summarize characteristics and find patterns",
+    learning_objective: "Identify data quality issues, distributions, and statistical relationships"
+})
+CREATE (visuals:Topic {
+    name: "Data Visualization",
+    difficulty: "Intermediate",
+    estimated_hours: 5,
+    description: "Communicating data insights through charts and graphs",
+    learning_objective: "Select and produce appropriate visualizations for different data types"
+})
+CREATE (imputation:Topic {
+    name: "Imputation Techniques",
+    difficulty: "Intermediate",
+    estimated_hours: 5,
+    description: "Handling missing values in structured datasets",
+    learning_objective: "Apply appropriate imputation strategies based on data type and missingness pattern"
+})
+CREATE (augmentation:Topic {
+    name: "Data Augmentation",
+    difficulty: "Advanced",
+    estimated_hours: 5,
+    description: "Generating synthetic data to address class imbalance",
+    learning_objective: "Apply SMOTE and its variants to imbalanced classification datasets"
+})
+CREATE (featureReduction:Topic {
+    name: "Feature Reduction",
+    difficulty: "Advanced",
+    estimated_hours: 4,
+    description: "Reducing dimensionality while preserving information",
+    learning_objective: "Apply PCA and dimensionality reduction to high-feature datasets"
+})
+CREATE (metrics:Topic {
+    name: "Business Metrics",
+    difficulty: "Intermediate",
+    estimated_hours: 4,
+    description: "Computing and interpreting key business performance indicators",
+    learning_objective: "Calculate and interpret churn, YoY growth, run rate, and forecasts"
+})
+CREATE (preprocessing:Topic {
+    name: "Preprocessing Summary",
+    difficulty: "Intermediate",
+    estimated_hours: 3,
+    description: "Consolidating all preprocessing steps into a production-ready pipeline",
+    learning_objective: "Assemble a full preprocessing pipeline ready for ML model input"
+})
+CREATE (ml:Topic {
+    name: "ML Frameworks",
+    difficulty: "Advanced",
+    estimated_hours: 8,
+    description: "Building and training models using PyTorch and TensorFlow",
+    learning_objective: "Implement and train a neural network using at least one major ML framework"
+})
+
+// ─────────────────────────────────────────
+// CONCEPT NODES
+// ─────────────────────────────────────────
+CREATE (missingDataConcept:Concept {
+    name: "Missing Data",
+    description: "Absence of values in a dataset that must be handled before modeling"
+})
+CREATE (classImbalanceConcept:Concept {
+    name: "Class Imbalance",
+    description: "Unequal distribution of target classes in a classification dataset"
+})
+CREATE (dimensionalityConcept:Concept {
+    name: "Curse of Dimensionality",
+    description: "Performance degradation as the number of features increases"
+})
+CREATE (correlationConcept:Concept {
+    name: "Feature Correlation",
+    description: "Statistical relationship between two or more variables"
+})
+CREATE (distributionConcept:Concept {
+    name: "Data Distribution",
+    description: "How values are spread across a variable"
+})
+CREATE (stationarityConcept:Concept {
+    name: "Time Series Stationarity",
+    description: "Whether statistical properties of a time series change over time"
+})
+
+// ─────────────────────────────────────────
+// LIBRARY NODES
+// ─────────────────────────────────────────
+CREATE (pandas:Library     { name: "pandas",           version: "2.x",    install: "pip install pandas",           docs: "https://pandas.pydata.org" })
+CREATE (numpy:Library      { name: "numpy",            version: "1.x",    install: "pip install numpy",            docs: "https://numpy.org" })
+CREATE (sklearn:Library    { name: "scikit-learn",     version: "1.x",    install: "pip install scikit-learn",     docs: "https://scikit-learn.org" })
+CREATE (imblearn:Library   { name: "imbalanced-learn", version: "0.11.x", install: "pip install imbalanced-learn", docs: "https://imbalanced-learn.org" })
+CREATE (matplotlib:Library { name: "matplotlib",       version: "3.x",    install: "pip install matplotlib",       docs: "https://matplotlib.org" })
+CREATE (seaborn:Library    { name: "seaborn",          version: "0.13.x", install: "pip install seaborn",          docs: "https://seaborn.pydata.org" })
+CREATE (pytorchLib:Library { name: "PyTorch",          version: "2.x",    install: "pip install torch",            docs: "https://pytorch.org" })
+CREATE (tfLib:Library      { name: "TensorFlow",       version: "2.x",    install: "pip install tensorflow",       docs: "https://tensorflow.org" })
+CREATE (statsmodels:Library{ name: "statsmodels",      version: "0.14.x", install: "pip install statsmodels",      docs: "https://www.statsmodels.org" })
+CREATE (pykalman:Library   { name: "pykalman",         version: "0.9.x",  install: "pip install pykalman",         docs: "https://pykalman.github.io" })
+
+// ─────────────────────────────────────────
+// USE CASE NODES
+// ─────────────────────────────────────────
+CREATE (fraudDetection:UseCase  { name: "Fraud Detection",      domain: "Finance",        description: "Identifying fraudulent transactions in imbalanced datasets" })
+CREATE (churnPrediction:UseCase { name: "Churn Prediction",     domain: "Telecom/SaaS",   description: "Predicting which customers are likely to leave" })
+CREATE (salesForecast:UseCase   { name: "Sales Forecasting",    domain: "Retail/Finance", description: "Predicting future revenue or sales volume" })
+CREATE (sensorData:UseCase      { name: "Sensor Data Cleaning", domain: "IoT/Engineering",description: "Handling missing or noisy readings from sensors over time" })
+CREATE (imageClass:UseCase      { name: "Image Classification", domain: "Computer Vision",description: "Categorizing images using deep learning" })
+CREATE (nlp:UseCase             { name: "Text Classification",  domain: "NLP",            description: "Categorizing text using deep learning models" })
+
+// ─────────────────────────────────────────
+// ASSESSMENT NODES
+// ─────────────────────────────────────────
+CREATE (quizFileReading:Assessment { name: "File Reading Quiz",  type: "MCQ",      passing_score: 70, estimated_minutes: 15 })
+CREATE (labPandas:Assessment       { name: "Pandas Loading Lab", type: "Hands-on", tool: "Jupyter",   estimated_minutes: 30 })
+CREATE (quizEDA:Assessment         { name: "EDA Quiz",           type: "MCQ",      passing_score: 70, estimated_minutes: 20 })
+CREATE (labEDA:Assessment          { name: "EDA Lab",            type: "Hands-on", tool: "Jupyter",   estimated_minutes: 60 })
+CREATE (quizImputation:Assessment  { name: "Imputation Quiz",    type: "MCQ",      passing_score: 70, estimated_minutes: 15 })
+CREATE (labImputation:Assessment   { name: "Imputation Lab",     type: "Hands-on", tool: "Jupyter",   estimated_minutes: 45 })
+CREATE (quizAugmentation:Assessment{ name: "Augmentation Quiz",  type: "MCQ",      passing_score: 75, estimated_minutes: 15 })
+CREATE (labML:Assessment           { name: "ML Framework Lab",   type: "Hands-on", tool: "Jupyter",   estimated_minutes: 90 })
+CREATE (capstone:Assessment        { name: "Capstone Project",   type: "Project",  passing_score: 75, estimated_minutes: 480 })
+
+// ─────────────────────────────────────────
+// TECHNIQUE NODES
+// ─────────────────────────────────────────
+
+// Reading Structured Files
+CREATE (csv:Technique     { name: "CSV",     use_case: "Flat tabular data storage",                  limitation: "No schema enforcement, large files are slow",      python_function: "pd.read_csv()" })
+CREATE (excel:Technique   { name: "Excel",   use_case: "Business reports and multi-sheet data",      limitation: "Slow for large files, formatting inconsistencies",  python_function: "pd.read_excel()" })
+CREATE (json:Technique    { name: "JSON",    use_case: "Nested or semi-structured data from APIs",   limitation: "Requires normalization for tabular use",            python_function: "pd.read_json()" })
+CREATE (parquet:Technique { name: "Parquet", use_case: "Columnar storage for large datasets",        limitation: "Not human-readable",                                python_function: "pd.read_parquet()" })
+
+// Structured Data Types
+CREATE (dataframe:Technique { name: "DataFrame", use_case: "Primary 2D tabular structure for data manipulation", limitation: "In-memory only, not suited for very large datasets", python_function: "pd.DataFrame()" })
+CREATE (vector:Technique    { name: "Vector",    use_case: "1D numerical sequences",                             limitation: "Limited to single dimension",                       python_function: "np.array()" })
+CREATE (array:Technique     { name: "Array",     use_case: "Multi-dimensional numerical computation",            limitation: "No column labels or mixed types",                   python_function: "np.array()" })
+CREATE (tensor:Technique    { name: "Tensor",    use_case: "Deep learning model input and computation",          limitation: "Requires GPU for large-scale use",                  python_function: "torch.tensor()" })
+CREATE (sql:Technique       { name: "SQL",       use_case: "Querying relational databases",                      limitation: "Requires database connection setup",                python_function: "pd.read_sql()" })
+
+// EDA
+CREATE (describe:Technique    { name: ".describe()",                use_case: "Quick statistical summary of numeric columns",          limitation: "Only covers numeric types by default",              python_function: "df.describe()" })
+CREATE (info:Technique        { name: ".info()",                    use_case: "Overview of column types and null counts",             limitation: "Does not show value distributions",                 python_function: "df.info()" })
+CREATE (missing:Technique     { name: "Missing Value Inspection",   use_case: "Identifying columns and rows with null values",        limitation: "Does not explain why values are missing",           python_function: "df.isnull().sum()" })
+CREATE (outlier:Technique     { name: "Outlier Detection",          use_case: "Finding extreme values that skew analysis",            limitation: "Threshold selection is subjective",                 python_function: "IQR or z-score methods" })
+CREATE (pearson:Technique     { name: "Pearson Correlation",        use_case: "Linear relationships between continuous variables",    limitation: "Assumes normality, sensitive to outliers",          python_function: "df.corr(method='pearson')" })
+CREATE (spearman:Technique    { name: "Spearman Ranking Correlation",use_case: "Monotonic relationships, non-normal data",            limitation: "Does not capture non-monotonic relationships",      python_function: "df.corr(method='spearman')" })
+CREATE (dist:Technique        { name: "Distribution Checking",      use_case: "Understanding spread and skewness of features",        limitation: "Visual interpretation can be subjective",           python_function: "df.hist() or sns.histplot()" })
+CREATE (imbalance:Technique   { name: "Class Imbalance Detection",  use_case: "Identifying skewed target class ratios",              limitation: "Does not resolve the imbalance on its own",         python_function: "df['target'].value_counts()" })
+CREATE (stationarity:Technique{ name: "Time-Series Stationarity Checking", use_case: "Verifying time series assumptions before modeling", limitation: "ADF test has low power on short series",        python_function: "adfuller() from statsmodels" })
+
+// Data Visualization
+CREATE (bar:Technique      { name: "Bar Chart",          use_case: "Comparing categorical counts or values",      limitation: "Cluttered with too many categories",             python_function: "sns.barplot()" })
+CREATE (box:Technique      { name: "Box Plot",           use_case: "Visualizing distribution and outliers",       limitation: "Hides multimodal distributions",                 python_function: "sns.boxplot()" })
+CREATE (timegraph:Technique{ name: "Value vs Time Graph",use_case: "Tracking trends over time",                  limitation: "Can be misleading with irregular time intervals", python_function: "plt.plot()" })
+CREATE (pareto:Technique   { name: "Pareto Graph",       use_case: "Identifying the most impactful categories",  limitation: "Requires meaningful category ranking",           python_function: "Custom matplotlib implementation" })
+CREATE (heatmap:Technique  { name: "Heatmap",            use_case: "Visualizing correlation matrices",            limitation: "Hard to read with many features",                python_function: "sns.heatmap()" })
+
+// Imputation
+CREATE (staticfill:Technique  { name: "Static Fill",          use_case: "Non-time-series missing value imputation",                  limitation: "Does not account for temporal patterns",          python_function: "df.fillna(value)" })
+CREATE (forwardfill:Technique { name: "Forward Fill",         use_case: "Time series where last known value persists",               limitation: "Introduces lag bias",                             python_function: "df.fillna(method='ffill')" })
+CREATE (bfill:Technique       { name: "Backward Fill",        use_case: "Time series where next known value is used",               limitation: "Introduces future data leakage risk",             python_function: "df.fillna(method='bfill')" })
+CREATE (medianfill:Technique  { name: "Median Fill",          use_case: "Skewed distributions with outliers",                       limitation: "Ignores relationships between features",          python_function: "df.fillna(df.median())" })
+CREATE (meanfill:Technique    { name: "Mean Fill",            use_case: "Normally distributed numeric columns",                     limitation: "Sensitive to outliers",                           python_function: "df.fillna(df.mean())" })
+CREATE (tsfill:Technique      { name: "Time Series Fill",     use_case: "Imputation for sequential time-dependent data",            limitation: "Requires evenly spaced time index",               python_function: "df.interpolate()" })
+CREATE (interp:Technique      { name: "Linear Interpolation", use_case: "Smoothly filling gaps between known time points",          limitation: "Assumes linear change between points",            python_function: "df.interpolate(method='linear')" })
+CREATE (kalman:Technique      { name: "Kalman Smoothing",     use_case: "Noisy sensor or financial time series smoothing",          limitation: "Requires model parameter tuning",                 python_function: "KalmanFilter() from pykalman" })
+
+// Data Augmentation
+CREATE (smote:Technique   { name: "SMOTE",     use_case: "Oversampling minority class in imbalanced datasets",          limitation: "Can generate noisy samples near class boundaries", python_function: "SMOTE() from imblearn" })
+CREATE (tsmote:Technique  { name: "T-SMOTE",   use_case: "SMOTE adapted for time series data",                         limitation: "Less commonly supported in libraries",              python_function: "Custom or imblearn extensions" })
+CREATE (adasyn:Technique  { name: "ADASYN",    use_case: "Adaptive oversampling focusing on hard-to-learn regions",    limitation: "Can over-focus on noisy boundary samples",          python_function: "ADASYN() from imblearn" })
+CREATE (svmsmote:Technique{ name: "SVM-SMOTE", use_case: "Generating samples near SVM decision boundary",              limitation: "Computationally expensive on large datasets",       python_function: "SVMSMOTE() from imblearn" })
+
+// Feature Reduction
+CREATE (dimreduction:Technique{ name: "Dimensionality Reduction", use_case: "Reducing feature count while preserving variance",  limitation: "Reduced interpretability of new features",        python_function: "Multiple methods available in sklearn" })
+CREATE (pca:Technique         { name: "PCA",                      use_case: "Linear dimensionality reduction for numeric features", limitation: "Does not handle non-linear relationships",       python_function: "PCA() from sklearn" })
+
+// Business Metrics
+CREATE (runrate:Technique   { name: "Run Rate",   use_case: "Projecting annual revenue from partial period data", limitation: "Assumes current trends continue unchanged",     python_function: "Custom pandas calculation" })
+CREATE (forecasting:Technique{ name: "Forecasting",use_case: "Predicting future values from historical time series",limitation: "Accuracy degrades with longer horizons",        python_function: "statsmodels or prophet" })
+CREATE (churn:Technique     { name: "Churn Rate",  use_case: "Measuring customer attrition over a period",        limitation: "Does not explain why customers leave",          python_function: "Custom pandas calculation" })
+CREATE (turnover:Technique  { name: "Turnover Rate",use_case: "Measuring employee or inventory turnover",         limitation: "Varies significantly by industry benchmark",    python_function: "Custom pandas calculation" })
+CREATE (yoy:Technique       { name: "Year Over Year",use_case: "Comparing performance across equivalent time periods",limitation: "Ignores seasonality within the year",        python_function: "df.pct_change(periods=12)" })
+
+// ML Frameworks
+CREATE (pytorch:Technique   { name: "PyTorch",     use_case: "Research-oriented deep learning with dynamic computation graphs", limitation: "More verbose than Keras for quick prototyping",         python_function: "import torch" })
+CREATE (tensorflow:Technique{ name: "TensorFlow",  use_case: "Production-grade deep learning and deployment",                  limitation: "Steeper learning curve for custom research",           python_function: "import tensorflow as tf" })
+
+// ─────────────────────────────────────────
+// COVERS — python covers all topics
+// ─────────────────────────────────────────
+CREATE (python)-[:COVERS]->(fileReading)
+CREATE (python)-[:COVERS]->(dataTypes)
+CREATE (python)-[:COVERS]->(eda)
+CREATE (python)-[:COVERS]->(visuals)
+CREATE (python)-[:COVERS]->(imputation)
+CREATE (python)-[:COVERS]->(augmentation)
+CREATE (python)-[:COVERS]->(featureReduction)
+CREATE (python)-[:COVERS]->(metrics)
+CREATE (python)-[:COVERS]->(preprocessing)
+CREATE (python)-[:COVERS]->(ml)
+
+// ─────────────────────────────────────────
+// LEADS_TO
+// ─────────────────────────────────────────
+CREATE (preprocessing)-[:LEADS_TO]->(ml)
+
+// ─────────────────────────────────────────
+// INCLUDES — topics include techniques
+// ─────────────────────────────────────────
+CREATE (fileReading)-[:INCLUDES]->(csv)
+CREATE (fileReading)-[:INCLUDES]->(excel)
+CREATE (fileReading)-[:INCLUDES]->(json)
+CREATE (fileReading)-[:INCLUDES]->(parquet)
+CREATE (dataTypes)-[:INCLUDES]->(dataframe)
+CREATE (dataTypes)-[:INCLUDES]->(vector)
+CREATE (dataTypes)-[:INCLUDES]->(array)
+CREATE (dataTypes)-[:INCLUDES]->(tensor)
+CREATE (dataTypes)-[:INCLUDES]->(sql)
+CREATE (staticfill)-[:INCLUDES]->(forwardfill)
+CREATE (staticfill)-[:INCLUDES]->(bfill)
+CREATE (staticfill)-[:INCLUDES]->(medianfill)
+CREATE (staticfill)-[:INCLUDES]->(meanfill)
+CREATE (tsfill)-[:INCLUDES]->(interp)
+CREATE (tsfill)-[:INCLUDES]->(kalman)
+
+// ─────────────────────────────────────────
+// USES — topics use techniques
+// ─────────────────────────────────────────
+CREATE (eda)-[:USES]->(describe)
+CREATE (eda)-[:USES]->(info)
+CREATE (eda)-[:USES]->(missing)
+CREATE (eda)-[:USES]->(outlier)
+CREATE (eda)-[:USES]->(pearson)
+CREATE (eda)-[:USES]->(spearman)
+CREATE (eda)-[:USES]->(dist)
+CREATE (eda)-[:USES]->(imbalance)
+CREATE (eda)-[:USES]->(stationarity)
+CREATE (visuals)-[:USES]->(bar)
+CREATE (visuals)-[:USES]->(box)
+CREATE (visuals)-[:USES]->(timegraph)
+CREATE (visuals)-[:USES]->(pareto)
+CREATE (visuals)-[:USES]->(heatmap)
+CREATE (ml)-[:USES]->(pytorch)
+CREATE (ml)-[:USES]->(tensorflow)
+
+// ─────────────────────────────────────────
+// METHOD — imputation / augmentation / reduction methods
+// ─────────────────────────────────────────
+CREATE (imputation)-[:METHOD]->(staticfill)
+CREATE (imputation)-[:METHOD]->(tsfill)
+CREATE (augmentation)-[:METHOD]->(smote)
+CREATE (augmentation)-[:METHOD]->(tsmote)
+CREATE (augmentation)-[:METHOD]->(adasyn)
+CREATE (augmentation)-[:METHOD]->(svmsmote)
+CREATE (featureReduction)-[:METHOD]->(dimreduction)
+CREATE (featureReduction)-[:METHOD]->(pca)
+
+// ─────────────────────────────────────────
+// MEASURES — business metrics
+// ─────────────────────────────────────────
+CREATE (metrics)-[:MEASURES]->(runrate)
+CREATE (metrics)-[:MEASURES]->(forecasting)
+CREATE (metrics)-[:MEASURES]->(churn)
+CREATE (metrics)-[:MEASURES]->(turnover)
+CREATE (metrics)-[:MEASURES]->(yoy)
+
+// ─────────────────────────────────────────
+// COMPARED_TO
+// ─────────────────────────────────────────
+CREATE (pytorch)-[:COMPARED_TO {
+    difference:           "PyTorch uses dynamic graphs, TensorFlow uses static by default",
+    pytorch_strength:     "Flexibility for research and experimentation",
+    tensorflow_strength:  "Production deployment and TensorFlow Serving"
+}]->(tensorflow)
+
+// ─────────────────────────────────────────
+// PREREQUISITE — topic level
+// ─────────────────────────────────────────
+CREATE (fileReading)-[:PREREQUISITE { reason: "Must load data before understanding its types",           strength: "hard" }]->(dataTypes)
+CREATE (fileReading)-[:PREREQUISITE { reason: "Must load data before exploring it",                     strength: "hard" }]->(eda)
+CREATE (dataTypes)-[:PREREQUISITE   { reason: "Must understand data structures before analysis",        strength: "hard" }]->(eda)
+CREATE (eda)-[:PREREQUISITE         { reason: "Must understand data before visualizing patterns",       strength: "soft" }]->(visuals)
+CREATE (eda)-[:PREREQUISITE         { reason: "Must inspect missingness before imputing",               strength: "hard" }]->(imputation)
+CREATE (eda)-[:PREREQUISITE         { reason: "Must detect imbalance before augmenting",                strength: "hard" }]->(augmentation)
+CREATE (eda)-[:PREREQUISITE         { reason: "Must understand feature space before reducing it",       strength: "hard" }]->(featureReduction)
+CREATE (eda)-[:PREREQUISITE         { reason: "Must explore data before computing business KPIs",       strength: "soft" }]->(metrics)
+CREATE (imputation)-[:PREREQUISITE  { reason: "Clean data required before pipeline assembly",           strength: "hard" }]->(preprocessing)
+CREATE (augmentation)-[:PREREQUISITE{ reason: "Balanced data required before pipeline assembly",        strength: "hard" }]->(preprocessing)
+CREATE (featureReduction)-[:PREREQUISITE { reason: "Reduced features required before pipeline assembly",strength: "hard" }]->(preprocessing)
+CREATE (metrics)-[:PREREQUISITE     { reason: "Business context required before pipeline assembly",     strength: "soft" }]->(preprocessing)
+CREATE (preprocessing)-[:PREREQUISITE { reason: "Clean pipeline input required before model training", strength: "hard" }]->(ml)
+
+// ─────────────────────────────────────────
+// PREREQUISITE — technique level
+// ─────────────────────────────────────────
+CREATE (describe)-[:PREREQUISITE { reason: "Summary stats reveal where to look for missing data" }]->(missing)
+CREATE (describe)-[:PREREQUISITE { reason: "Summary stats reveal where outliers may exist" }]->(outlier)
+CREATE (info)-[:PREREQUISITE     { reason: "Column types and nulls inform missing value strategy" }]->(missing)
+CREATE (missing)-[:PREREQUISITE  { reason: "Must handle missing values before computing correlations" }]->(pearson)
+CREATE (missing)-[:PREREQUISITE  { reason: "Must handle missing values before computing correlations" }]->(spearman)
+CREATE (missing)-[:PREREQUISITE  { reason: "Must handle missing values before checking distributions" }]->(dist)
+CREATE (missing)-[:PREREQUISITE  { reason: "Must handle missing values before assessing class balance" }]->(imbalance)
+CREATE (missing)-[:PREREQUISITE  { reason: "Must handle missing values before stationarity testing" }]->(stationarity)
+CREATE (dist)-[:PREREQUISITE     { reason: "Distribution shape informs class imbalance interpretation" }]->(imbalance)
+CREATE (dist)-[:PREREQUISITE     { reason: "Distribution checking helps interpret stationarity results" }]->(stationarity)
+CREATE (staticfill)-[:PREREQUISITE { reason: "Static methods are simpler baseline before time-aware methods" }]->(tsfill)
+CREATE (smote)-[:PREREQUISITE    { reason: "Must understand base SMOTE before learning time-series variant" }]->(tsmote)
+CREATE (smote)-[:PREREQUISITE    { reason: "Must understand base SMOTE before adaptive variant" }]->(adasyn)
+CREATE (smote)-[:PREREQUISITE    { reason: "Must understand base SMOTE before SVM boundary variant" }]->(svmsmote)
+CREATE (dimreduction)-[:PREREQUISITE { reason: "PCA is a specific implementation of dimensionality reduction" }]->(pca)
+
+// ─────────────────────────────────────────
+// ADDRESSES — technique addresses concept
+// ─────────────────────────────────────────
+CREATE (missing)-[:ADDRESSES]->(missingDataConcept)
+CREATE (forwardfill)-[:ADDRESSES]->(missingDataConcept)
+CREATE (bfill)-[:ADDRESSES]->(missingDataConcept)
+CREATE (medianfill)-[:ADDRESSES]->(missingDataConcept)
+CREATE (meanfill)-[:ADDRESSES]->(missingDataConcept)
+CREATE (interp)-[:ADDRESSES]->(missingDataConcept)
+CREATE (kalman)-[:ADDRESSES]->(missingDataConcept)
+CREATE (staticfill)-[:ADDRESSES]->(missingDataConcept)
+CREATE (tsfill)-[:ADDRESSES]->(missingDataConcept)
+CREATE (imbalance)-[:ADDRESSES]->(classImbalanceConcept)
+CREATE (smote)-[:ADDRESSES]->(classImbalanceConcept)
+CREATE (tsmote)-[:ADDRESSES]->(classImbalanceConcept)
+CREATE (adasyn)-[:ADDRESSES]->(classImbalanceConcept)
+CREATE (svmsmote)-[:ADDRESSES]->(classImbalanceConcept)
+CREATE (pca)-[:ADDRESSES]->(dimensionalityConcept)
+CREATE (dimreduction)-[:ADDRESSES]->(dimensionalityConcept)
+CREATE (pearson)-[:ADDRESSES]->(correlationConcept)
+CREATE (spearman)-[:ADDRESSES]->(correlationConcept)
+CREATE (heatmap)-[:ADDRESSES]->(correlationConcept)
+CREATE (dist)-[:ADDRESSES]->(distributionConcept)
+CREATE (box)-[:ADDRESSES]->(distributionConcept)
+CREATE (stationarity)-[:ADDRESSES]->(stationarityConcept)
+CREATE (timegraph)-[:ADDRESSES]->(stationarityConcept)
+
+// ─────────────────────────────────────────
+// APPLIED_IN — technique applied in use case
+// ─────────────────────────────────────────
+CREATE (smote)-[:APPLIED_IN]->(fraudDetection)
+CREATE (adasyn)-[:APPLIED_IN]->(fraudDetection)
+CREATE (svmsmote)-[:APPLIED_IN]->(fraudDetection)
+CREATE (smote)-[:APPLIED_IN]->(churnPrediction)
+CREATE (churn)-[:APPLIED_IN]->(churnPrediction)
+CREATE (forecasting)-[:APPLIED_IN]->(salesForecast)
+CREATE (yoy)-[:APPLIED_IN]->(salesForecast)
+CREATE (runrate)-[:APPLIED_IN]->(salesForecast)
+CREATE (kalman)-[:APPLIED_IN]->(sensorData)
+CREATE (interp)-[:APPLIED_IN]->(sensorData)
+CREATE (tsfill)-[:APPLIED_IN]->(sensorData)
+CREATE (tensor)-[:APPLIED_IN]->(imageClass)
+CREATE (pytorch)-[:APPLIED_IN]->(imageClass)
+CREATE (tensorflow)-[:APPLIED_IN]->(imageClass)
+CREATE (pytorch)-[:APPLIED_IN]->(nlp)
+CREATE (tensorflow)-[:APPLIED_IN]->(nlp)
+
+// ─────────────────────────────────────────
+// IMPLEMENTED_IN — technique uses library
+// ─────────────────────────────────────────
+CREATE (csv)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (excel)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (json)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (dataframe)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (parquet)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (sql)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (vector)-[:IMPLEMENTED_IN]->(numpy)
+CREATE (array)-[:IMPLEMENTED_IN]->(numpy)
+CREATE (tensor)-[:IMPLEMENTED_IN]->(pytorchLib)
+CREATE (describe)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (info)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (missing)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (pearson)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (spearman)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (dist)-[:IMPLEMENTED_IN]->(matplotlib)
+CREATE (dist)-[:IMPLEMENTED_IN]->(seaborn)
+CREATE (outlier)-[:IMPLEMENTED_IN]->(sklearn)
+CREATE (imbalance)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (stationarity)-[:IMPLEMENTED_IN]->(statsmodels)
+CREATE (bar)-[:IMPLEMENTED_IN]->(seaborn)
+CREATE (box)-[:IMPLEMENTED_IN]->(seaborn)
+CREATE (timegraph)-[:IMPLEMENTED_IN]->(matplotlib)
+CREATE (pareto)-[:IMPLEMENTED_IN]->(matplotlib)
+CREATE (heatmap)-[:IMPLEMENTED_IN]->(seaborn)
+CREATE (forwardfill)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (bfill)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (medianfill)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (meanfill)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (interp)-[:IMPLEMENTED_IN]->(pandas)
+CREATE (kalman)-[:IMPLEMENTED_IN]->(pykalman)
+CREATE (smote)-[:IMPLEMENTED_IN]->(imblearn)
+CREATE (tsmote)-[:IMPLEMENTED_IN]->(imblearn)
+CREATE (adasyn)-[:IMPLEMENTED_IN]->(imblearn)
+CREATE (svmsmote)-[:IMPLEMENTED_IN]->(imblearn)
+CREATE (pca)-[:IMPLEMENTED_IN]->(sklearn)
+CREATE (dimreduction)-[:IMPLEMENTED_IN]->(sklearn)
+CREATE (forecasting)-[:IMPLEMENTED_IN]->(statsmodels)
+CREATE (pytorch)-[:IMPLEMENTED_IN]->(pytorchLib)
+CREATE (tensorflow)-[:IMPLEMENTED_IN]->(tfLib)
+
+// ─────────────────────────────────────────
+// ASSESSED_BY — topic assessed by assessment
+// ─────────────────────────────────────────
+CREATE (fileReading)-[:ASSESSED_BY]->(quizFileReading)
+CREATE (fileReading)-[:ASSESSED_BY]->(labPandas)
+CREATE (eda)-[:ASSESSED_BY]->(quizEDA)
+CREATE (eda)-[:ASSESSED_BY]->(labEDA)
+CREATE (imputation)-[:ASSESSED_BY]->(quizImputation)
+CREATE (imputation)-[:ASSESSED_BY]->(labImputation)
+CREATE (augmentation)-[:ASSESSED_BY]->(quizAugmentation)
+CREATE (ml)-[:ASSESSED_BY]->(labML)
+CREATE (preprocessing)-[:ASSESSED_BY]->(capstone)
