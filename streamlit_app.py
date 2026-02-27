@@ -157,7 +157,7 @@ def load_components():
     solver       = SolverAgent(llm, retriever, neo4j, letta)
     assessment   = AssessmentAgent(llm, retriever, neo4j, letta)
     feedback     = FeedbackAgent(llm, retriever, neo4j, letta)
-    orchestrator = Orchestrator(solver, assessment, feedback, neo4j, letta)
+    orchestrator = Orchestrator(solver, recommender, assessment, feedback, neo4j, letta)
     return {
         "llm": llm, "embedder": embedder, "retriever": retriever, "neo4j": neo4j, "letta": letta,
         "solver": solver, "assessment": assessment,
