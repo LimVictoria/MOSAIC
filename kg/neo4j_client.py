@@ -1,7 +1,8 @@
 # kg/neo4j_client.py
 # Neo4j connection and core operations
-# Updated to use Topic and Technique nodes from curriculum KG
-# Temporal: mastered_at timestamp written when node reaches green status
+# Supports two KGs in the same database:
+#   1. FODS Curriculum KG  — Topic + Technique nodes (student learning progress)
+#   2. Time Series KG      — PipelineStage, Model, Concept, EvalMetric, etc.
 
 from neo4j import GraphDatabase
 from config import KG_VISIBLE_THRESHOLD, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
@@ -9,21 +10,14 @@ from config import KG_VISIBLE_THRESHOLD, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 class Neo4jClient:
     """
     Core Neo4j client.
-    Works with curriculum KG — Topic and Technique nodes.
-    Topic nodes   = high-level subjects (e.g. Exploratory Data Analysis)
-    Technique nodes = specific skills under each topic (e.g. Pearson Correlation)
 
-    Status values (set per student interaction):
-      grey   = not yet reached
-      blue   = currently studying
-      yellow = being assessed
-      green  = mastered
-      red    = needs review (failed 3+ times)
-      orange = prerequisite gap
-
-    Temporal fields:
-      mastered_at = ISO timestamp when node first reached green (never overwritten)
+    FODS Curriculum KG (Topic / Technique):
+      Status: grey, blue, yellow, green, red, orange
+      mastered_at = ISO timestamp when first reached green
       updated_at  = ISO timestamp of last status change
+
+    Time Series KG (PipelineStage, Model, Concept, EvalMetric, etc.):
+      Read-only display — no student status tracking on these nodes.
     """
 
     def __init__(self):
@@ -62,11 +56,6 @@ class Neo4jClient:
     # ── Status updates ─────────────────────────────
 
     def update_topic_status(self, topic_name: str, status: str):
-        """
-        Update status on a Topic node.
-        Called by Solver (blue), Assessment (yellow), Feedback (green/red/orange).
-        Writes mastered_at when status becomes green — only set once, never overwritten.
-        """
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         cypher = """
@@ -81,11 +70,6 @@ class Neo4jClient:
         self.query(cypher, {"name": topic_name, "status": status, "now": now})
 
     def update_technique_status(self, technique_name: str, status: str):
-        """
-        Update status on a Technique node.
-        Called by Feedback Agent after detailed assessment.
-        Writes mastered_at when status becomes green — only set once, never overwritten.
-        """
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         cypher = """
@@ -100,11 +84,6 @@ class Neo4jClient:
         self.query(cypher, {"name": technique_name, "status": status, "now": now})
 
     def update_node_status(self, name: str, status: str):
-        """
-        Update status on either Topic or Technique — tries both.
-        Used by agents that don't distinguish between node types.
-        Writes mastered_at when status becomes green — only set once, never overwritten.
-        """
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         cypher = """
@@ -122,11 +101,6 @@ class Neo4jClient:
     # ── Prerequisite checks ────────────────────────
 
     def get_prerequisites(self, topic_name: str) -> list[str]:
-        """
-        Get prerequisite Topics for a given Topic.
-        Used by Solver Agent before explaining — checks what student needs first.
-        Traverses up to 3 levels deep.
-        """
         cypher = """
         MATCH (t:Topic {name: $name})-[:PREREQUISITE*1..3]->(pre:Topic)
         RETURN pre.name as name, pre.status as status
@@ -136,10 +110,6 @@ class Neo4jClient:
         return [r["name"] for r in results]
 
     def get_unmastered_prerequisites(self, topic_name: str) -> list[str]:
-        """
-        Get prerequisites that are NOT yet mastered (status != green).
-        Used to enforce prerequisite gating.
-        """
         cypher = """
         MATCH (t:Topic {name: $name})-[:PREREQUISITE*1..3]->(pre:Topic)
         WHERE coalesce(pre.status, 'grey') <> 'green'
@@ -150,10 +120,6 @@ class Neo4jClient:
         return [r["name"] for r in results]
 
     def get_prerequisite_chain_for_feedback(self, topic_name: str) -> list[dict]:
-        """
-        Full prerequisite chain with status — used by Feedback Agent
-        to trace root cause of mistakes.
-        """
         cypher = """
         MATCH path = (t:Topic {name: $name})-[:PREREQUISITE*]->(pre:Topic)
         RETURN pre.name as name,
@@ -166,10 +132,6 @@ class Neo4jClient:
     # ── Curriculum structure reads ─────────────────
 
     def get_curriculum_structure(self) -> list[dict]:
-        """
-        Returns full curriculum — all Topics with their prerequisites.
-        Passed to LLM system prompt so it knows the learning sequence.
-        """
         cypher = """
         MATCH (t:Topic)
         OPTIONAL MATCH (t)-[:PREREQUISITE]->(pre:Topic)
@@ -181,10 +143,6 @@ class Neo4jClient:
         return self.query(cypher)
 
     def get_topic_techniques(self, topic_name: str) -> list[dict]:
-        """
-        Get all Techniques under a Topic with their status.
-        Used by Assessment Agent to ask technique-specific questions.
-        """
         cypher = """
         MATCH (t:Topic {name: $name})-[]->(tech:Technique)
         RETURN tech.name as name,
@@ -194,10 +152,6 @@ class Neo4jClient:
         return self.query(cypher, {"name": topic_name})
 
     def get_related_topics(self, topic_name: str) -> list[str]:
-        """
-        Get Topics related to a given Topic via any relationship.
-        Used by Assessment Agent to generate comprehensive questions.
-        """
         cypher = """
         MATCH (t:Topic {name: $name})-[r]-(related:Topic)
         RETURN related.name as name
@@ -207,10 +161,6 @@ class Neo4jClient:
         return [r["name"] for r in results]
 
     def get_learning_path(self, target_topic: str) -> list[str]:
-        """
-        Get ordered learning path to reach a target Topic.
-        Returns sequence from root to target.
-        """
         cypher = """
         MATCH path = (start:Topic)-[:PREREQUISITE*]->(target:Topic {name: $name})
         WHERE NOT (start)<-[:PREREQUISITE]-()
@@ -224,11 +174,6 @@ class Neo4jClient:
         return [target_topic]
 
     def get_next_recommended_topic(self) -> str:
-        """
-        Returns the next Topic the student should study.
-        Finds Topics whose prerequisites are all mastered but
-        the topic itself is not yet mastered.
-        """
         cypher = """
         MATCH (t:Topic)
         WHERE coalesce(t.status, 'grey') <> 'green'
@@ -246,11 +191,6 @@ class Neo4jClient:
         return "Python for Data Science"
 
     def map_concept_to_topic(self, concept_name: str) -> str:
-        """
-        Maps a free-text concept from student conversation to nearest Topic node.
-        Used by KG Builder to avoid creating random nodes.
-        Returns matched topic name or None.
-        """
         cypher = """
         MATCH (t:Topic)
         WHERE toLower(t.name) CONTAINS toLower($name)
@@ -262,7 +202,6 @@ class Neo4jClient:
         if results:
             return results[0]["name"]
 
-        # Also check Techniques
         cypher2 = """
         MATCH (tech:Technique)
         WHERE toLower(tech.name) CONTAINS toLower($name)
@@ -279,9 +218,20 @@ class Neo4jClient:
     # ── KG visibility ──────────────────────────────
 
     def get_node_count(self) -> int:
-        """Returns total number of Topic + Technique nodes."""
+        """FODS KG: total Topic + Technique nodes."""
         result = self.query("""
             MATCH (n) WHERE n:Topic OR n:Technique
+            RETURN count(n) as count
+        """)
+        return result[0]["count"] if result else 0
+
+    def get_ts_node_count(self) -> int:
+        """Time Series KG: total node count."""
+        result = self.query("""
+            MATCH (n)
+            WHERE n:PipelineStage OR n:Model OR n:Concept
+               OR n:EvalMetric OR n:BestPractice OR n:AntiPattern
+               OR n:UseCase OR n:LearningPath OR n:PredictionType
             RETURN count(n) as count
         """)
         return result[0]["count"] if result else 0
@@ -290,10 +240,6 @@ class Neo4jClient:
         return self.get_node_count() > KG_VISIBLE_THRESHOLD
 
     def get_mastered_concepts(self, student_id: str = None) -> list[str]:
-        """
-        Returns list of mastered Topic names (status = green).
-        student_id kept for API compatibility but status is stored on node directly.
-        """
         results = self.query("""
             MATCH (t:Topic {status: 'green'})
             RETURN t.name as name
@@ -303,11 +249,6 @@ class Neo4jClient:
     # ── Temporal — learning progression ───────────
 
     def get_mastery_timeline(self) -> list[dict]:
-        """
-        Returns all mastered nodes ordered by mastered_at timestamp.
-        Used to show the student's learning progression over time.
-        Returns: [{name, node_type, mastered_at}, ...]
-        """
         return self.query("""
             MATCH (n)
             WHERE (n:Topic OR n:Technique)
@@ -320,14 +261,8 @@ class Neo4jClient:
         """)
 
     def sync_mastery_from_letta(self, mastered_concepts: list[str]):
-        """
-        Backfill mastery from Letta into Neo4j for concepts mastered
-        in previous sessions where mastered_at was not recorded.
-        Uses a sentinel timestamp so timeline shows these as 'before current session'.
-        Only writes to nodes that are not already green.
-        """
         from datetime import datetime, timezone
-        sentinel = "2000-01-01T00:00:00+00:00"  # clearly historical
+        sentinel = "2000-01-01T00:00:00+00:00"
         for name in mastered_concepts:
             self.query("""
                 MATCH (n)
@@ -338,13 +273,15 @@ class Neo4jClient:
                     n.updated_at  = $ts
             """, {"name": name, "ts": sentinel})
 
-    # ── Frontend export ────────────────────────────
+    # ═══════════════════════════════════════════════
+    # FRONTEND EXPORT — FODS Curriculum KG
+    # ═══════════════════════════════════════════════
 
     def to_cytoscape_json(self) -> dict:
         """
-        Convert curriculum KG to Cytoscape.js format for Streamlit frontend.
-        Shows Topic nodes as large circles, Technique nodes as smaller ones.
-        Includes mastered_at in node data for tooltip display.
+        FODS Curriculum KG → Cytoscape.js format.
+        Topic nodes = large, Technique nodes = small.
+        Colored by student mastery status.
         """
         status_colors = {
             "grey":   "#9CA3AF",
@@ -355,25 +292,22 @@ class Neo4jClient:
             "orange": "#F97316",
         }
 
-        # Fetch Topic nodes
         topics = self.query("""
             MATCH (t:Topic)
             RETURN t.name as name,
                    coalesce(t.status, 'grey') as status,
-                   t.mastered_at as mastered_at,
+                   coalesce(t.mastered_at, null) as mastered_at,
                    'topic' as node_type
         """)
 
-        # Fetch Technique nodes
         techniques = self.query("""
             MATCH (t:Technique)
             RETURN t.name as name,
                    coalesce(t.status, 'grey') as status,
-                   t.mastered_at as mastered_at,
+                   coalesce(t.mastered_at, null) as mastered_at,
                    'technique' as node_type
         """)
 
-        # Fetch all relationships
         edges_result = self.query("""
             MATCH (a)-[r]->(b)
             WHERE (a:Topic OR a:Technique) AND (b:Topic OR b:Technique)
@@ -387,7 +321,6 @@ class Neo4jClient:
         for node in topics:
             status      = node.get("status", "grey")
             mastered_at = node.get("mastered_at")
-            # Format mastered_at for tooltip — show date only
             mastered_label = ""
             if mastered_at and mastered_at != "2000-01-01T00:00:00+00:00":
                 mastered_label = f" · mastered {mastered_at[:10]}"
@@ -443,7 +376,157 @@ class Neo4jClient:
 
         node_count = len(cytoscape_nodes)
         return {
-            "elements": {"nodes": cytoscape_nodes, "edges": cytoscape_edges},
+            "elements":   {"nodes": cytoscape_nodes, "edges": cytoscape_edges},
             "node_count": node_count,
-            "visible": node_count > KG_VISIBLE_THRESHOLD
+            "visible":    node_count > KG_VISIBLE_THRESHOLD,
+            "kg_type":    "fods",
+        }
+
+    # ═══════════════════════════════════════════════
+    # FRONTEND EXPORT — Time Series KG
+    # ═══════════════════════════════════════════════
+
+    def to_cytoscape_json_pipeline(self, view: str = "pipeline") -> dict:
+        """
+        Time Series KG → Cytoscape.js format.
+
+        view="pipeline"  → 9 PipelineStage nodes + LEADS_TO (clean, default sidebar)
+        view="models"    → PipelineStage + Model nodes + USES/LEADS_TO edges
+        view="concepts"  → Concept nodes + LEARN_BEFORE / ADDRESSES edges
+        view="full"      → All node types (heavy — use in explorer only)
+        """
+        type_colors = {
+            "PipelineStage": "#0284C7",
+            "Model":         "#7C3AED",
+            "Concept":       "#059669",
+            "EvalMetric":    "#D97706",
+            "BestPractice":  "#10B981",
+            "AntiPattern":   "#EF4444",
+            "UseCase":       "#6366F1",
+            "LearningPath":  "#EC4899",
+            "PredictionType":"#0891B2",
+            "Technique":     "#64748B",
+        }
+        edge_colors = {
+            "LEADS_TO":         "#0284C7",
+            "USES":             "#7C3AED",
+            "SUITABLE_FOR":     "#059669",
+            "EVALUATED_BY":     "#D97706",
+            "ADDRESSES":        "#10B981",
+            "LEARN_BEFORE":     "#6366F1",
+            "REQUIRES_CONCEPT": "#EF4444",
+            "COMPARED_TO":      "#94A3B8",
+            "MUST_PRECEDE":     "#F97316",
+            "NEXT_STAGE":       "#0284C7",
+            "RELEVANT_TO":      "#64748B",
+        }
+
+        if view == "pipeline":
+            nodes_raw = self.query("""
+                MATCH (n:PipelineStage)
+                RETURN n.name as name,
+                       coalesce(toString(n.order), '') as order,
+                       coalesce(n.description, '') as description,
+                       'PipelineStage' as label_type
+                ORDER BY n.order
+            """)
+            edges_raw = self.query("""
+                MATCH (a:PipelineStage)-[r:LEADS_TO|NEXT_STAGE]->(b:PipelineStage)
+                RETURN a.name as source, b.name as target,
+                       type(r) as relationship
+            """)
+
+        elif view == "models":
+            nodes_raw = self.query("""
+                MATCH (n) WHERE n:PipelineStage OR n:Model
+                RETURN n.name as name,
+                       labels(n)[0] as label_type,
+                       coalesce(n.description, n.family, '') as description
+            """)
+            edges_raw = self.query("""
+                MATCH (a)-[r:USES|LEADS_TO|NEXT_STAGE]->(b)
+                WHERE (a:PipelineStage OR a:Model)
+                  AND (b:PipelineStage OR b:Model)
+                RETURN a.name as source, b.name as target,
+                       type(r) as relationship
+            """)
+
+        elif view == "concepts":
+            nodes_raw = self.query("""
+                MATCH (n:Concept)
+                RETURN n.name as name,
+                       'Concept' as label_type,
+                       coalesce(n.description, '') as description
+            """)
+            edges_raw = self.query("""
+                MATCH (a:Concept)-[r:LEARN_BEFORE]->(b:Concept)
+                RETURN a.name as source, b.name as target,
+                       'LEARN_BEFORE' as relationship
+                UNION
+                MATCH (t:Technique)-[r:ADDRESSES]->(c:Concept)
+                RETURN t.name as source, c.name as target,
+                       'ADDRESSES' as relationship
+            """)
+
+        else:  # full
+            nodes_raw = self.query("""
+                MATCH (n)
+                WHERE n:PipelineStage OR n:Model OR n:Concept
+                   OR n:EvalMetric OR n:PredictionType OR n:UseCase
+                RETURN n.name as name,
+                       labels(n)[0] as label_type,
+                       coalesce(n.description, n.family, '') as description
+            """)
+            edges_raw = self.query("""
+                MATCH (a)-[r]->(b)
+                WHERE (a:PipelineStage OR a:Model OR a:Concept
+                    OR a:EvalMetric OR a:PredictionType OR a:UseCase)
+                  AND (b:PipelineStage OR b:Model OR b:Concept
+                    OR b:EvalMetric OR b:PredictionType OR b:UseCase)
+                RETURN a.name as source, b.name as target,
+                       type(r) as relationship
+                LIMIT 300
+            """)
+
+        cytoscape_nodes = []
+        for node in nodes_raw:
+            label_type = node.get("label_type", "PipelineStage")
+            name       = node.get("name", "")
+            desc       = node.get("description", "")
+            size       = 28 if label_type == "PipelineStage" else 16
+
+            cytoscape_nodes.append({
+                "data": {
+                    "id":        name.lower().replace(" ", "_").replace("/", "_").replace("(", "").replace(")", ""),
+                    "label":     name,
+                    "color":     type_colors.get(label_type, "#94A3B8"),
+                    "node_type": label_type,
+                    "tooltip":   f"[{label_type}] {name}" + (f"\n{desc[:80]}" if desc else ""),
+                    "size":      size,
+                }
+            })
+
+        cytoscape_edges = []
+        for i, edge in enumerate(edges_raw):
+            rel = edge.get("relationship", "")
+            src = edge["source"].lower().replace(" ", "_").replace("/", "_").replace("(", "").replace(")", "")
+            tgt = edge["target"].lower().replace(" ", "_").replace("/", "_").replace("(", "").replace(")", "")
+            cytoscape_edges.append({
+                "data": {
+                    "id":           f"pe{i}",
+                    "source":       src,
+                    "target":       tgt,
+                    "relationship": rel,
+                    "label":        rel.replace("_", " ").lower(),
+                    "color":        edge_colors.get(rel, "#94A3B8"),
+                }
+            })
+
+        node_count = len(cytoscape_nodes)
+        return {
+            "elements":   {"nodes": cytoscape_nodes, "edges": cytoscape_edges},
+            "node_count": node_count,
+            "visible":    node_count > 0,
+            "kg_type":    "timeseries",
+            "view":       view,
         }
