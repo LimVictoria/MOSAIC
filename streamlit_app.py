@@ -82,6 +82,7 @@ section[data-testid="collapsedControl"] { visibility: visible !important; displa
 .tag-assessment { background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; }
 .tag-feedback   { background: #F3E8FF; color: #6B21A8; border: 1px solid #D8B4FE; }
 .tag-system     { background: #DCFCE7; color: #166534; border: 1px solid #86EFAC; }
+.tag-recommender { background: #FFF7ED; color: #C2410C; border: 1px solid #FDBA74; }
 .panel-header {
     font-size: 0.6rem;
     font-weight: 700;
@@ -145,6 +146,7 @@ def load_components():
     from rag.retriever import RAGRetriever
     from kg.neo4j_client import Neo4jClient
     from agents.solver_agent import SolverAgent
+    from agents.recommender_agent import RecommenderAgent
     from agents.assessment_agent import AssessmentAgent
     from agents.feedback_agent import FeedbackAgent
     from agents.orchestrator import Orchestrator
@@ -155,12 +157,13 @@ def load_components():
     neo4j        = Neo4jClient()
     letta        = LettaClient()
     solver       = SolverAgent(llm, retriever, neo4j, letta)
+    recommender  = RecommenderAgent(llm, retriever, neo4j, letta)
     assessment   = AssessmentAgent(llm, retriever, neo4j, letta)
     feedback     = FeedbackAgent(llm, retriever, neo4j, letta)
-    orchestrator = Orchestrator(solver, assessment, feedback, neo4j, letta)
+    orchestrator = Orchestrator(solver, recommender, assessment, feedback, neo4j, letta)
     return {
         "llm": llm, "embedder": embedder, "retriever": retriever, "neo4j": neo4j, "letta": letta,
-        "solver": solver, "assessment": assessment,
+        "solver": solver, "recommender": recommender, "assessment": assessment,
         "feedback": feedback, "orchestrator": orchestrator,
     }
 
@@ -187,10 +190,11 @@ STATUS_LABELS = {
     "green": "Mastered ✓", "red": "Needs review", "orange": "Prereq gap",
 }
 AGENT_TAGS = {
-    "Solver":     ("SOLVER",   "tag-solver"),
-    "Assessment": ("ASSESS",   "tag-assessment"),
-    "Feedback":   ("FEEDBACK", "tag-feedback"),
-    "System":     ("SYSTEM",   "tag-system"),
+    "Solver":      ("SOLVER",    "tag-solver"),
+    "Recommender": ("RECOMMEND", "tag-recommender"),
+    "Assessment":  ("ASSESS",    "tag-assessment"),
+    "Feedback":    ("FEEDBACK",  "tag-feedback"),
+    "System":      ("SYSTEM",    "tag-system"),
 }
 
 # ─────────────────────────────────────────────────────
@@ -203,7 +207,6 @@ for key, val in {
     "kg_data": None, "kg_visible": False, "last_kg_refresh": 0,
     "response_style": "Balanced", "difficulty_override": "Auto",
     "ingestion_done": False,
-    "mastery_synced": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -214,16 +217,6 @@ if COMPONENTS_LOADED and not st.session_state["ingestion_done"]:
         from rag.fetch_docs import run_ingestion
         run_ingestion()
     st.session_state["ingestion_done"] = True
-
-# Sync Letta mastery → Neo4j once per session (backfill for previous sessions)
-if COMPONENTS_LOADED and not st.session_state["mastery_synced"]:
-    try:
-        mastered = components["letta"].get_mastered_concepts(st.session_state.student_id)
-        if mastered:
-            components["neo4j"].sync_mastery_from_letta(mastered)
-    except Exception:
-        pass  # non-critical — don't block app startup
-    st.session_state["mastery_synced"] = True
 
 # ─────────────────────────────────────────────────────
 # Agent helpers
@@ -338,7 +331,7 @@ def render_kg(kg_data: dict, height: int = 380):
         nodes.append(Node(
             id=d["id"], label=label, size=size,
             color=STATUS_COLORS.get(status, "#9CA3AF"),
-            title=d.get("tooltip") or f"{d['label']} · {STATUS_LABELS.get(status, status)} · {node_type}",
+            title=f"{d['label']} · {STATUS_LABELS.get(status, status)} · {node_type}",
             font={"color": "#1E293B", "size": 10 if node_type == "technique" else 12, "face": "JetBrains Mono"}
         ))
 
@@ -436,7 +429,7 @@ col_left, col_right = st.columns([1, 1.8], gap="large")
 # LEFT — Input & Controls
 # ══════════════════════════════════════════════════════
 with col_left:
-    tab_chat, tab_assess, tab_settings, tab_eval = st.tabs(["💬 Chat", "📝 Assessment", "⚙️ Settings", "🧪 Evaluation"])
+    tab_chat, tab_assess, tab_settings, tab_eval = st.tabs(["💬 Learn", "📝 Assessment", "⚙️ Settings", "🧪 Evaluation"])
 
     # ── CHAT ──
     with tab_chat:
