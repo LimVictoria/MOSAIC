@@ -137,7 +137,7 @@ hr { border-color: #F1F5F9 !important; }
 # ─────────────────────────────────────────────────────
 # Load components
 # ─────────────────────────────────────────────────────
-@st.cache_resource(ttl=1800)
+@st.cache_resource(ttl=1801)
 def load_components():
     from llm_client import LLMClient
     from memory.letta_client import LettaClient
