@@ -211,12 +211,19 @@ for key, val in {
     if key not in st.session_state:
         st.session_state[key] = val
 
-# Run ingestion once per session — after session state is initialised
+# Run ingestion in background thread so Streamlit starts immediately
+# Avoids 60s health check timeout on cold boot with large document sets
 if COMPONENTS_LOADED and not st.session_state["ingestion_done"]:
-    with st.spinner("Checking knowledge base..."):
-        from rag.fetch_docs import run_ingestion
-        run_ingestion()
-    st.session_state["ingestion_done"] = True
+    import threading
+    def _ingest_background():
+        try:
+            from rag.fetch_docs import run_ingestion
+            run_ingestion()
+        except Exception as e:
+            print(f"Background ingestion error: {e}")
+    thread = threading.Thread(target=_ingest_background, daemon=True)
+    thread.start()
+    st.session_state["ingestion_done"] = True  # mark done immediately so it only starts once
 
 # ─────────────────────────────────────────────────────
 # Agent helpers
