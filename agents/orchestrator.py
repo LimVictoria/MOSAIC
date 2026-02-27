@@ -113,16 +113,15 @@ You are MOSAIC, a friendly AI tutor specialising in data science.
 
 Give a SHORT, conversational answer to the student's question.
 
-CRITICAL: You will be given recent conversation history and retrieved documentation.
-- Use the conversation history to resolve abbreviations (e.g. if "TFT" was mentioned as
-  "Temporal Fusion Transformer" earlier, treat it as such — never guess from training knowledge)
-- Use the retrieved documentation as your primary source of truth
-- If the documentation says something different from your training knowledge, trust the documentation
-
-Rules:
-- Answer in 2-5 sentences maximum
-- Be warm, clear, and direct
-- No bullet points, headers, or code blocks
+CRITICAL RULES:
+- Answer ONLY what the student asked. Do NOT reference any prior topic unless it is
+  explicitly in the "Recent conversation" block below.
+- If the "Recent conversation" block is empty, there is NO prior context — do not invent any.
+- Use the retrieved documentation as your primary source of truth.
+- If the docs say something different from your training knowledge, trust the docs.
+- Answer in 2-5 sentences maximum.
+- Be warm, clear, and direct.
+- No bullet points, headers, or code blocks.
 - At the very end, ask: "Would you like a more detailed explanation?"
 """
 
@@ -131,20 +130,19 @@ You are MOSAIC, a friendly AI tutor specialising in data science.
 
 Give a SHORT, conversational answer that directly addresses the comparison or recommendation.
 
-CRITICAL: You will be given recent conversation history and retrieved documentation.
-- Use the conversation history to resolve abbreviations (e.g. if "TFT" was mentioned as
-  "Temporal Fusion Transformer" earlier, treat it as such — never guess from training knowledge)
-- Use the retrieved documentation as your primary source of truth
-- If the documentation says something different from your training knowledge, trust the documentation
-
-Rules:
-- Answer in 2-5 sentences maximum — give the key insight immediately
-- Be direct — give a verdict or clear recommendation, don't hedge
-- No bullet points, headers, or code blocks
-- At the very end, ask ONE specific question based on what would help most:
-  - If it's a comparison: "Would you like a deeper comparison with code examples for both?"
-  - If it's a recommendation: "Would you like me to show you how to implement this with code?"
-  - If it's a project: "Would you like a full project roadmap with code snippets?"
+CRITICAL RULES:
+- Answer ONLY what the student asked. Do NOT reference any prior topic unless it is
+  explicitly in the "Recent conversation" block below.
+- If the "Recent conversation" block is empty, there is NO prior context — do not invent any.
+- Use the retrieved documentation as your primary source of truth.
+- If the docs say something different from your training knowledge, trust the docs.
+- Answer in 2-5 sentences maximum — give the key insight immediately.
+- Be direct — give a verdict or clear recommendation, don't hedge.
+- No bullet points, headers, or code blocks.
+- At the very end, ask ONE specific follow-up question:
+  - If comparison: "Would you like a deeper comparison with code examples for both?"
+  - If recommendation: "Would you like me to show you how to implement this with code?"
+  - If project: "Would you like a full project roadmap with code snippets?"
   - Default: "Would you like a deeper explanation with code examples?"
 """
 
@@ -172,20 +170,6 @@ recommend techniques for specific goals, and can test understanding.
 
 
 class Orchestrator:
-    """
-    Chat-first orchestrator.
-
-    Routing logic:
-      Recommender keywords (compare/vs/recommend/project/pros-cons/math) → brief_recommend → Recommender
-      Technical questions (explain/how/what is)                          → brief → Solver
-      Explicit test requests                                              → Assessment
-      Pure casual chat                                                    → casual reply
-
-    For both Solver and Recommender:
-      First gives a brief answer + "want more detail?"
-      If student says yes → full response from the appropriate agent
-    """
-
     def __init__(self, solver, recommender, assessment, feedback, neo4j, letta):
         self.solver          = solver
         self.recommender     = recommender
@@ -279,9 +263,9 @@ class Orchestrator:
                 ).strip().upper()
 
                 if answer.startswith("YES"):
-                    concept         = self.pending_concept
+                    concept          = self.pending_concept
                     original_message = self.pending_message or state["message"]
-                    intent          = self.pending_intent  # "solver" or "recommender"
+                    intent           = self.pending_intent
                     self.pending_concept = None
                     self.pending_message = None
                     self.pending_intent  = None
@@ -295,7 +279,6 @@ class Orchestrator:
                     self.pending_concept = None
                     self.pending_message = None
                     self.pending_intent  = None
-                    # Fall through to normal classification
             except Exception:
                 self.pending_concept = None
                 self.pending_message = None
@@ -336,14 +319,12 @@ class Orchestrator:
         if is_recommender.startswith("YES"):
             return {**state, "intent": "brief_recommend"}
 
-        # 6. Default — technical question goes to brief → Solver
         return {**state, "intent": "brief"}
 
     def _route(self, state: TutorState) -> str:
         return state["intent"]
 
     def _extract_concept(self, message: str) -> str:
-        """Map student message to nearest curriculum Topic."""
         try:
             concept = self.llm.generate(
                 system_prompt=CONCEPT_EXTRACT_PROMPT,
@@ -366,7 +347,9 @@ class Orchestrator:
         return {**state, "response": response, "agent_used": "Solver"}
 
     def _build_brief_context(self, message: str, history: list, retriever_fn) -> str:
-        """Build user_message with RAG context + history for brief answers."""
+        """Build user_message with RAG context + history for brief answers.
+        Only includes history block if there are actual messages — prevents hallucination.
+        """
         # Fetch RAG
         try:
             rag_docs    = retriever_fn(message)
@@ -374,24 +357,29 @@ class Orchestrator:
         except Exception:
             rag_context = ""
 
-        # Format history
+        # Format history — only if non-empty
         history_text = ""
         if history:
             turns = []
             for m in history[-6:]:
                 role = "Student" if m["role"] == "user" else "Tutor"
                 turns.append(f"{role}: {m['content'][:200]}")
-            history_text = "Recent conversation:\n" + "\n".join(turns)
+            if turns:
+                history_text = "Recent conversation:\n" + "\n".join(turns) + "\n"
 
-        return f"""{history_text}
+        # Build context block
+        parts = []
+        if history_text:
+            parts.append(history_text)
+        else:
+            parts.append("Recent conversation: (none — this is the student's first message)\n")
 
-Retrieved documentation:
-{rag_context if rag_context else "No documentation retrieved."}
+        parts.append(f"Retrieved documentation:\n{rag_context if rag_context else 'No documentation retrieved.'}")
+        parts.append(f"\nStudent question: {message}")
 
-Student question: {message}"""
+        return "\n".join(parts)
 
     def _run_brief_answer(self, state: TutorState) -> TutorState:
-        """Brief answer with RAG + history → store pending for Solver follow-up."""
         try:
             user_message = self._build_brief_context(
                 state["message"],
@@ -405,7 +393,6 @@ Student question: {message}"""
             concept = self._extract_concept(state["message"])
             if concept:
                 self.pending_concept = concept
-                # Store original message + explicit instruction to include code
                 self.pending_message = state["message"] + " — include detailed code examples and step by step explanation"
                 self.pending_intent  = "solver"
         except Exception as e:
@@ -413,7 +400,6 @@ Student question: {message}"""
         return {**state, "response": response, "agent_used": "Solver"}
 
     def _run_brief_recommend(self, state: TutorState) -> TutorState:
-        """Brief recommendation with RAG + history → store pending for Recommender follow-up."""
         try:
             user_message = self._build_brief_context(
                 state["message"],
@@ -427,7 +413,6 @@ Student question: {message}"""
             concept = self._extract_concept(state["message"])
             if concept:
                 self.pending_concept = concept
-                # Store original message + explicit instruction to include code
                 self.pending_message = state["message"] + " — include detailed code examples"
                 self.pending_intent  = "recommender"
         except Exception as e:
@@ -435,7 +420,6 @@ Student question: {message}"""
         return {**state, "response": response, "agent_used": "Recommender"}
 
     def _run_solver(self, state: TutorState) -> TutorState:
-        """Full explanation from Solver."""
         response = self.solver.explain(
             student_id=state["student_id"],
             concept=state["concept"],
@@ -446,7 +430,6 @@ Student question: {message}"""
         return {**state, "response": response, "agent_used": "Solver"}
 
     def _run_recommender(self, state: TutorState) -> TutorState:
-        """Full recommendation from Recommender."""
         response = self.recommender.recommend(
             student_id=state["student_id"],
             message=state["message"],
