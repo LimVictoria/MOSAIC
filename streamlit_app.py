@@ -82,7 +82,6 @@ section[data-testid="collapsedControl"] { visibility: visible !important; displa
 .tag-assessment { background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; }
 .tag-feedback   { background: #F3E8FF; color: #6B21A8; border: 1px solid #D8B4FE; }
 .tag-system     { background: #DCFCE7; color: #166534; border: 1px solid #86EFAC; }
-.tag-recommender { background: #FFF7ED; color: #C2410C; border: 1px solid #FDBA74; }
 .panel-header {
     font-size: 0.6rem;
     font-weight: 700;
@@ -146,7 +145,6 @@ def load_components():
     from rag.retriever import RAGRetriever
     from kg.neo4j_client import Neo4jClient
     from agents.solver_agent import SolverAgent
-    from agents.recommender_agent import RecommenderAgent
     from agents.assessment_agent import AssessmentAgent
     from agents.feedback_agent import FeedbackAgent
     from agents.orchestrator import Orchestrator
@@ -157,13 +155,12 @@ def load_components():
     neo4j        = Neo4jClient()
     letta        = LettaClient()
     solver       = SolverAgent(llm, retriever, neo4j, letta)
-    recommender  = RecommenderAgent(llm, retriever, neo4j, letta)
     assessment   = AssessmentAgent(llm, retriever, neo4j, letta)
     feedback     = FeedbackAgent(llm, retriever, neo4j, letta)
-    orchestrator = Orchestrator(solver, recommender, assessment, feedback, neo4j, letta)
+    orchestrator = Orchestrator(solver, assessment, feedback, neo4j, letta)
     return {
         "llm": llm, "embedder": embedder, "retriever": retriever, "neo4j": neo4j, "letta": letta,
-        "solver": solver, "recommender": recommender, "assessment": assessment,
+        "solver": solver, "assessment": assessment,
         "feedback": feedback, "orchestrator": orchestrator,
     }
 
@@ -190,11 +187,10 @@ STATUS_LABELS = {
     "green": "Mastered ✓", "red": "Needs review", "orange": "Prereq gap",
 }
 AGENT_TAGS = {
-    "Solver":      ("SOLVER",    "tag-solver"),
-    "Recommender": ("RECOMMEND", "tag-recommender"),
-    "Assessment":  ("ASSESS",    "tag-assessment"),
-    "Feedback":    ("FEEDBACK",  "tag-feedback"),
-    "System":      ("SYSTEM",    "tag-system"),
+    "Solver":     ("SOLVER",   "tag-solver"),
+    "Assessment": ("ASSESS",   "tag-assessment"),
+    "Feedback":   ("FEEDBACK", "tag-feedback"),
+    "System":     ("SYSTEM",   "tag-system"),
 }
 
 # ─────────────────────────────────────────────────────
@@ -225,8 +221,21 @@ def call_chat(message: str) -> dict:
     if not COMPONENTS_LOADED:
         return {"response": f"Error: {LOAD_ERROR}", "agent": "System"}
     try:
-        orch     = components["orchestrator"]
-        response = orch.route(student_id=st.session_state.student_id, message=message)
+        orch = components["orchestrator"]
+
+        # Pass last 6 messages (3 turns) as conversation context
+        # so agents know what was discussed e.g. "TFT" = Temporal Fusion Transformer
+        recent = st.session_state.messages[-6:] if st.session_state.messages else []
+        history = [
+            {"role": m["role"], "content": m["content"]}
+            for m in recent
+        ]
+
+        response = orch.route(
+            student_id=st.session_state.student_id,
+            message=message,
+            history=history
+        )
         return {"response": response, "agent": orch.last_agent_used}
     except Exception as e:
         return {"response": f"Agent error: {e}", "agent": "System"}
@@ -429,7 +438,7 @@ col_left, col_right = st.columns([1, 1.8], gap="large")
 # LEFT — Input & Controls
 # ══════════════════════════════════════════════════════
 with col_left:
-    tab_chat, tab_assess, tab_settings, tab_eval = st.tabs(["💬 Learn", "📝 Assessment", "⚙️ Settings", "🧪 Evaluation"])
+    tab_chat, tab_assess, tab_settings, tab_eval = st.tabs(["💬 Chat", "📝 Assessment", "⚙️ Settings", "🧪 Evaluation"])
 
     # ── CHAT ──
     with tab_chat:
