@@ -92,7 +92,7 @@ class RecommenderAgent:
         self.neo4j     = neo4j
         self.letta     = letta
 
-    def recommend(self, student_id: str, message: str, mode: str = "auto") -> str:
+    def recommend(self, student_id: str, message: str, mode: str = "auto", history: list = None) -> str:
         """
         Main entry point. Mode is auto-detected if not specified.
 
@@ -138,11 +138,23 @@ class RecommenderAgent:
         # 7. Build mode-specific instructions
         mode_instruction = self._get_mode_instruction(mode, message)
 
-        # 8. Build prompt
+        # 8. Format recent conversation history
+        history_text = ""
+        if history:
+            turns = []
+            for m in (history or [])[-6:]:
+                role    = "Student" if m["role"] == "user" else "Tutor"
+                snippet = m["content"][:200]
+                turns.append(f"{role}: {snippet}")
+            history_text = "Recent conversation (use this to resolve abbreviations and understand context):\n" + "\n".join(turns)
+
+        # 9. Build prompt
         user_message = f"""
 Student Level:    {student_level}
 Learning Style:   {learning_style}
 Mastered Topics:  {mastery_text}
+
+{history_text}
 
 Student message: {message}
 
