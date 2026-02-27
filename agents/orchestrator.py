@@ -1,5 +1,6 @@
 # agents/orchestrator.py
 # Chat-first orchestrator: always brief answer first, then offer deeper
+# Routes to Solver, Recommender, Assessment, or Feedback based on intent
 
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
@@ -42,6 +43,50 @@ Answer NO for everything else including normal questions and explanations.
 Reply with ONLY one word: YES or NO.
 """
 
+IS_RECOMMENDER_PROMPT = """
+You are a message classifier for an AI tutoring system.
+
+Should this message be routed to the RECOMMENDER agent?
+
+Route to RECOMMENDER (answer YES) when the student is:
+- Comparing two or more methods (vs, versus, compare, difference between, better than)
+- Asking which technique/method to use for a goal (should I use, what method, recommend, suggest)
+- Asking about pros/cons/trade-offs of methods (pros, cons, advantages, disadvantages, trade-off)
+- Asking why one approach is better than another (why is X better than Y)
+- Asking what methods/techniques exist for a problem (what are the different methods for)
+- Asking mathematical or theoretical differences between approaches (mathematically, math behind)
+- Asking when to use a technique (when should I use, when to use)
+- Asking for a project suggestion (suggest a project, project idea, build a system)
+- Asking for a recommendation for their specific goal (what should I use for fraud detection)
+
+Route to SOLVER (answer NO) when the student is:
+- Asking how to code or implement something (how do I code, show me how to implement)
+- Asking for a step-by-step tutorial on one concept
+- Asking what a single concept means (what is PCA, explain SMOTE)
+- Asking for a code example of one specific thing
+
+Examples:
+"why is TFT better than 1D CNN-LSTM" → YES (comparison)
+"what are the different methods to do resampling" → YES (what methods exist)
+"mathematically, should we use T-SMOTE or ADASYN" → YES (mathematical comparison)
+"how do I code SMOTE in Python" → NO (implementation)
+"explain PCA step by step" → NO (explain one concept)
+"compare SimpleImputer vs KNNImputer" → YES (comparison)
+"what method should I use for imbalanced data" → YES (recommendation)
+"show me how to read a CSV file" → NO (implementation)
+"which is better for fraud detection, SMOTE or random oversampling" → YES (comparison + recommendation)
+"what are the pros and cons of mean imputation" → YES (pros/cons)
+"how do I implement KNN imputer in sklearn" → NO (implementation)
+"when should I use PCA vs t-SNE" → YES (when to use + comparison)
+"walk me through the math behind PCA" → YES (mathematical)
+"how do I drop null values in pandas" → NO (implementation)
+"is feature scaling necessary before PCA" → YES (recommendation)
+"what should I use if my dataset has 95% missing values" → YES (recommendation)
+"suggest a project for churn prediction" → YES (project)
+
+Reply with ONLY one word: YES or NO.
+"""
+
 CONCEPT_EXTRACT_PROMPT = """
 You are a curriculum topic classifier for a data science course.
 
@@ -74,14 +119,27 @@ Rules:
 - At the very end, ask: "Would you like a more detailed explanation?"
 """
 
+BRIEF_RECOMMENDER_PROMPT = """
+You are MOSAIC, a friendly AI tutor specialising in data science.
+
+Give a SHORT, conversational answer that directly addresses the comparison or recommendation.
+
+Rules:
+- Answer in 2-5 sentences maximum — give the key insight immediately
+- Be direct — give a verdict or clear recommendation, don't hedge
+- No bullet points, headers, or code blocks
+- At the very end, ask: "Would you like a detailed comparison with code examples?"
+"""
+
 FOLLOWUP_PROMPT = """
 You are a message classifier.
 
-The student was just given a brief answer and asked "Would you like a more detailed explanation?"
+The student was just given a brief answer and asked if they want more detail.
 
 Did they say YES?
 
-Answer YES for: yes, sure, please, go ahead, yeah, yep, definitely, of course, elaborate, more, tell me more, explain more, deeper, full explanation, why not
+Answer YES for: yes, sure, please, go ahead, yeah, yep, definitely, of course, elaborate, more,
+                tell me more, explain more, deeper, full explanation, why not, show me, give me more
 Answer NO for: no, nope, thanks, that's enough, i'm good, ok thanks, no thanks, not now
 
 Reply with ONLY one word: YES or NO.
@@ -91,7 +149,8 @@ CASUAL_CHAT_PROMPT = """
 You are MOSAIC, a friendly AI tutor specialising in data science.
 
 Have a natural, warm, brief conversation. Keep it short and friendly.
-If they ask what you can do, explain you teach data science concepts and can test understanding.
+If they ask what you can do, explain you teach data science concepts, compare methods,
+recommend techniques for specific goals, and can test understanding.
 """
 
 
@@ -99,32 +158,41 @@ class Orchestrator:
     """
     Chat-first orchestrator.
 
-    ALL technical questions go through Chat first (brief answer + offer deeper).
-    Only if user says yes → Solver (full lesson).
-    Explicit test requests → Assessment directly.
-    Pure casual chat → casual reply.
+    Routing logic:
+      Recommender keywords (compare/vs/recommend/project/pros-cons/math) → brief_recommend → Recommender
+      Technical questions (explain/how/what is)                          → brief → Solver
+      Explicit test requests                                              → Assessment
+      Pure casual chat                                                    → casual reply
+
+    For both Solver and Recommender:
+      First gives a brief answer + "want more detail?"
+      If student says yes → full response from the appropriate agent
     """
 
-    def __init__(self, solver, assessment, feedback, neo4j, letta):
+    def __init__(self, solver, recommender, assessment, feedback, neo4j, letta):
         self.solver          = solver
+        self.recommender     = recommender
         self.assessment      = assessment
         self.feedback        = feedback
         self.neo4j           = neo4j
         self.letta           = letta
         self.llm             = solver.llm
         self.last_agent_used = None
-        self.pending_concept: str | None = None
-        self.pending_message: str | None = None   # store original message for Solver
+        self.pending_concept:  str | None = None
+        self.pending_message:  str | None = None
+        self.pending_intent:   str | None = None  # "solver" or "recommender"
         self.graph = self._build_graph()
 
     def _build_graph(self):
         workflow = StateGraph(TutorState)
 
-        workflow.add_node("classify",   self._classify)
-        workflow.add_node("chat",       self._run_casual_chat)
-        workflow.add_node("brief",      self._run_brief_answer)
-        workflow.add_node("solver",     self._run_solver)
-        workflow.add_node("assessment", self._run_assessment)
+        workflow.add_node("classify",         self._classify)
+        workflow.add_node("chat",             self._run_casual_chat)
+        workflow.add_node("brief",            self._run_brief_answer)
+        workflow.add_node("brief_recommend",  self._run_brief_recommend)
+        workflow.add_node("solver",           self._run_solver)
+        workflow.add_node("recommender",      self._run_recommender)
+        workflow.add_node("assessment",       self._run_assessment)
 
         workflow.set_entry_point("classify")
 
@@ -132,17 +200,21 @@ class Orchestrator:
             "classify",
             self._route,
             {
-                "chat":       "chat",
-                "brief":      "brief",
-                "solver":     "solver",
-                "assessment": "assessment",
+                "chat":            "chat",
+                "brief":           "brief",
+                "brief_recommend": "brief_recommend",
+                "solver":          "solver",
+                "recommender":     "recommender",
+                "assessment":      "assessment",
             }
         )
 
-        workflow.add_edge("chat",       END)
-        workflow.add_edge("brief",      END)
-        workflow.add_edge("solver",     END)
-        workflow.add_edge("assessment", END)
+        workflow.add_edge("chat",            END)
+        workflow.add_edge("brief",           END)
+        workflow.add_edge("brief_recommend", END)
+        workflow.add_edge("solver",          END)
+        workflow.add_edge("recommender",     END)
+        workflow.add_edge("assessment",      END)
 
         return workflow.compile()
 
@@ -177,10 +249,11 @@ class Orchestrator:
         if any(w in message for w in assessment_words):
             self.pending_concept = None
             self.pending_message = None
+            self.pending_intent  = None
             return {**state, "intent": "assessment"}
 
-        # 2. Check if this is a follow-up yes/no to pending concept
-        if self.pending_concept:
+        # 2. Check if this is a follow-up yes/no to a pending concept
+        if self.pending_concept and self.pending_intent:
             try:
                 answer = self.llm.generate(
                     system_prompt=FOLLOWUP_PROMPT,
@@ -188,23 +261,27 @@ class Orchestrator:
                 ).strip().upper()
 
                 if answer.startswith("YES"):
-                    concept = self.pending_concept
+                    concept         = self.pending_concept
                     original_message = self.pending_message or state["message"]
+                    intent          = self.pending_intent  # "solver" or "recommender"
                     self.pending_concept = None
                     self.pending_message = None
+                    self.pending_intent  = None
                     return {
                         **state,
-                        "intent":  "solver",
+                        "intent":  intent,
                         "concept": concept,
-                        "message": original_message   # restore original message for RAG
+                        "message": original_message
                     }
                 else:
                     self.pending_concept = None
                     self.pending_message = None
+                    self.pending_intent  = None
                     # Fall through to normal classification
             except Exception:
                 self.pending_concept = None
                 self.pending_message = None
+                self.pending_intent  = None
 
         # 3. Pure casual chat keywords
         casual_words = [
@@ -217,17 +294,32 @@ class Orchestrator:
         if any(message == w or message.startswith(w + " ") for w in casual_words):
             return {**state, "intent": "chat"}
 
-        # 4. LLM classifier for everything else
+        # 4. LLM classifier — is it technical at all?
         try:
-            answer = self.llm.generate(
+            is_technical = self.llm.generate(
                 system_prompt=IS_TECHNICAL_PROMPT,
                 user_message=state["message"]
             ).strip().upper()
-            intent = "brief" if answer.startswith("YES") else "chat"
         except Exception:
-            intent = "brief"
+            is_technical = "YES"
 
-        return {**state, "intent": intent}
+        if not is_technical.startswith("YES"):
+            return {**state, "intent": "chat"}
+
+        # 5. LLM classifier — should it go to Recommender?
+        try:
+            is_recommender = self.llm.generate(
+                system_prompt=IS_RECOMMENDER_PROMPT,
+                user_message=state["message"]
+            ).strip().upper()
+        except Exception:
+            is_recommender = "NO"
+
+        if is_recommender.startswith("YES"):
+            return {**state, "intent": "brief_recommend"}
+
+        # 6. Default — technical question goes to brief → Solver
+        return {**state, "intent": "brief"}
 
     def _route(self, state: TutorState) -> str:
         return state["intent"]
@@ -239,9 +331,7 @@ class Orchestrator:
                 system_prompt=CONCEPT_EXTRACT_PROMPT,
                 user_message=message
             ).strip()
-            if not concept:
-                return message[:60]
-            return concept
+            return concept if concept else message[:60]
         except Exception:
             return message[:60]
 
@@ -258,35 +348,55 @@ class Orchestrator:
         return {**state, "response": response, "agent_used": "Solver"}
 
     def _run_brief_answer(self, state: TutorState) -> TutorState:
-        """Give a short answer and store pending concept + original message for follow-up."""
+        """Brief answer → store pending for Solver follow-up."""
         try:
             response = self.llm.generate(
                 system_prompt=BRIEF_ANSWER_PROMPT,
                 user_message=state["message"]
             )
-            # Extract curriculum topic and store original message for Solver
             concept = self._extract_concept(state["message"])
             if concept:
                 self.pending_concept = concept
-                self.pending_message = state["message"]   # store original question
+                self.pending_message = state["message"]
+                self.pending_intent  = "solver"
         except Exception as e:
             response = f"Something went wrong: {e}"
-
         return {**state, "response": response, "agent_used": "Solver"}
 
+    def _run_brief_recommend(self, state: TutorState) -> TutorState:
+        """Brief recommendation → store pending for Recommender follow-up."""
+        try:
+            response = self.llm.generate(
+                system_prompt=BRIEF_RECOMMENDER_PROMPT,
+                user_message=state["message"]
+            )
+            concept = self._extract_concept(state["message"])
+            if concept:
+                self.pending_concept = concept
+                self.pending_message = state["message"]
+                self.pending_intent  = "recommender"
+        except Exception as e:
+            response = f"Something went wrong: {e}"
+        return {**state, "response": response, "agent_used": "Recommender"}
+
     def _run_solver(self, state: TutorState) -> TutorState:
-        """
-        Run Solver with both curriculum topic AND original message.
-        - concept → maps to curriculum KG node, updates status
-        - message → used for RAG retrieval to get relevant chunks
-        """
+        """Full explanation from Solver."""
         response = self.solver.explain(
             student_id=state["student_id"],
             concept=state["concept"],
             focus=state.get("re_teach_focus") or None,
-            message=state["message"]    # original message for RAG retrieval
+            message=state["message"]
         )
         return {**state, "response": response, "agent_used": "Solver"}
+
+    def _run_recommender(self, state: TutorState) -> TutorState:
+        """Full recommendation from Recommender."""
+        response = self.recommender.recommend(
+            student_id=state["student_id"],
+            message=state["message"],
+            mode="auto"
+        )
+        return {**state, "response": response, "agent_used": "Recommender"}
 
     def _run_assessment(self, state: TutorState) -> TutorState:
         response = (
