@@ -132,7 +132,7 @@ class RecommenderAgent:
             mode = self._detect_mode(message)
 
         # 6. Retrieve RAG context — method docs, papers, examples
-        rag_docs    = self.retriever.retrieve_for_solver(message)
+        rag_docs    = self.retriever.retrieve_for_recommender(message)
         rag_context = "\n\n".join([doc["text"] for doc in rag_docs[:4]])
 
         # 7. Build mode-specific instructions
