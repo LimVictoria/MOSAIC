@@ -317,6 +317,7 @@ class Neo4jClient:
         """)
 
         cytoscape_nodes = []
+        seen_ids = set()  # prevent duplicate node IDs
 
         for node in topics:
             status      = node.get("status", "grey")
@@ -327,18 +328,21 @@ class Neo4jClient:
             elif mastered_at:
                 mastered_label = " · mastered (previous session)"
 
-            cytoscape_nodes.append({
-                "data": {
-                    "id":          node["name"].lower().replace(" ", "_"),
-                    "label":       node["name"],
-                    "status":      status,
-                    "color":       status_colors.get(status, "#9CA3AF"),
-                    "node_type":   "topic",
-                    "mastered_at": mastered_at or "",
-                    "tooltip":     f"{node['name']}{mastered_label}",
-                    "difficulty":  "intermediate"
-                }
-            })
+            node_id = node["name"].lower().replace(" ", "_")
+            if node_id not in seen_ids:
+                seen_ids.add(node_id)
+                cytoscape_nodes.append({
+                    "data": {
+                        "id":          node_id,
+                        "label":       node["name"],
+                        "status":      status,
+                        "color":       status_colors.get(status, "#9CA3AF"),
+                        "node_type":   "topic",
+                        "mastered_at": mastered_at or "",
+                        "tooltip":     f"{node['name']}{mastered_label}",
+                        "difficulty":  "intermediate"
+                    }
+                })
 
         for node in techniques:
             status      = node.get("status", "grey")
@@ -349,21 +353,31 @@ class Neo4jClient:
             elif mastered_at:
                 mastered_label = " · mastered (previous session)"
 
-            cytoscape_nodes.append({
-                "data": {
-                    "id":          node["name"].lower().replace(" ", "_"),
-                    "label":       node["name"],
-                    "status":      status,
-                    "color":       status_colors.get(status, "#9CA3AF"),
-                    "node_type":   "technique",
-                    "mastered_at": mastered_at or "",
-                    "tooltip":     f"{node['name']}{mastered_label}",
-                    "difficulty":  "beginner"
-                }
-            })
+            node_id = node["name"].lower().replace(" ", "_")
+            if node_id not in seen_ids:
+                seen_ids.add(node_id)
+                cytoscape_nodes.append({
+                    "data": {
+                        "id":          node_id,
+                        "label":       node["name"],
+                        "status":      status,
+                        "color":       status_colors.get(status, "#9CA3AF"),
+                        "node_type":   "technique",
+                        "mastered_at": mastered_at or "",
+                        "tooltip":     f"{node['name']}{mastered_label}",
+                        "difficulty":  "beginner"
+                    }
+                })
 
         cytoscape_edges = []
+        seen_edge_pairs = set()
         for i, edge in enumerate(edges_result):
+            src = edge["source"].lower().replace(" ", "_")
+            tgt = edge["target"].lower().replace(" ", "_")
+            pair = (src, tgt, edge["relationship"])
+            if pair in seen_edge_pairs:
+                continue
+            seen_edge_pairs.add(pair)
             cytoscape_edges.append({
                 "data": {
                     "id":           f"e{i}",
@@ -489,15 +503,19 @@ class Neo4jClient:
             """)
 
         cytoscape_nodes = []
+        seen_ids = set()
         for node in nodes_raw:
             label_type = node.get("label_type", "PipelineStage")
             name       = node.get("name", "")
             desc       = node.get("description", "")
             size       = 28 if label_type == "PipelineStage" else 16
-
+            node_id    = name.lower().replace(" ", "_").replace("/", "_").replace("(", "").replace(")", "")
+            if node_id in seen_ids:
+                continue
+            seen_ids.add(node_id)
             cytoscape_nodes.append({
                 "data": {
-                    "id":        name.lower().replace(" ", "_").replace("/", "_").replace("(", "").replace(")", ""),
+                    "id":        node_id,
                     "label":     name,
                     "color":     type_colors.get(label_type, "#94A3B8"),
                     "node_type": label_type,
