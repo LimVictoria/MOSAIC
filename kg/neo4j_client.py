@@ -84,22 +84,36 @@ class Neo4jClient:
         """
         self.query(cypher, {"name": technique_name, "status": status, "now": now})
 
-    def update_node_status(self, name: str, status: str):
+    def update_node_status(self, name: str, status: str, kg: str = None):
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
-        cypher = """
-        MATCH (n)
-        WHERE (n:Topic OR n:Technique)
-          AND n.name = $name
-          AND coalesce(n.kg, 'fods') = 'fods'
-        SET n.status = $status,
-            n.updated_at = $now
-        WITH n
-        WHERE $status = 'green' AND n.mastered_at IS NULL
-        SET n.mastered_at = $now
-        RETURN n
-        """
-        self.query(cypher, {"name": name, "status": status, "now": now})
+        # Match any node by name — works for both FODS and TS KGs
+        # Optionally filter by kg to avoid cross-KG collisions on shared names
+        if kg:
+            cypher = """
+            MATCH (n)
+            WHERE n.name = $name
+              AND coalesce(n.kg, 'fods') = $kg
+            SET n.status = $status,
+                n.updated_at = $now
+            WITH n
+            WHERE $status = 'green' AND n.mastered_at IS NULL
+            SET n.mastered_at = $now
+            RETURN n
+            """
+            self.query(cypher, {"name": name, "status": status, "now": now, "kg": kg})
+        else:
+            cypher = """
+            MATCH (n)
+            WHERE n.name = $name
+            SET n.status = $status,
+                n.updated_at = $now
+            WITH n
+            WHERE $status = 'green' AND n.mastered_at IS NULL
+            SET n.mastered_at = $now
+            RETURN n
+            """
+            self.query(cypher, {"name": name, "status": status, "now": now})
 
     # ── Prerequisite checks ────────────────────────
 
@@ -165,6 +179,18 @@ class Neo4jClient:
         LIMIT 5
         """
         results = self.query(cypher, {"name": topic_name})
+        return [r["name"] for r in results]
+
+    def get_related_concepts(self, name: str) -> list[str]:
+        """Works for both FODS (Topic/Technique) and TS (any node type)."""
+        cypher = """
+        MATCH (n)-[r]-(related)
+        WHERE n.name = $name
+          AND related.name IS NOT NULL
+        RETURN DISTINCT related.name as name
+        LIMIT 5
+        """
+        results = self.query(cypher, {"name": name})
         return [r["name"] for r in results]
 
     def get_learning_path(self, target_topic: str) -> list[str]:
@@ -280,9 +306,7 @@ class Neo4jClient:
         for name in mastered_concepts:
             self.query("""
                 MATCH (n)
-                WHERE (n:Topic OR n:Technique)
-                  AND n.name = $name
-                  AND coalesce(n.kg, 'fods') = 'fods'
+                WHERE n.name = $name
                   AND coalesce(n.status, 'grey') <> 'green'
                 SET n.status = 'green',
                     n.mastered_at = $ts,
@@ -461,7 +485,8 @@ class Neo4jClient:
                 RETURN n.name as name,
                        coalesce(toString(n.order), '') as order,
                        coalesce(n.description, '') as description,
-                       'PipelineStage' as label_type
+                       'PipelineStage' as label_type,
+                       coalesce(n.status, 'grey') as status
                 ORDER BY n.order
             """)
             edges_raw = self.query("""
@@ -475,7 +500,8 @@ class Neo4jClient:
                 MATCH (n) WHERE n:PipelineStage OR n:Model
                 RETURN n.name as name,
                        labels(n)[0] as label_type,
-                       coalesce(n.description, n.family, '') as description
+                       coalesce(n.description, n.family, '') as description,
+                       coalesce(n.status, 'grey') as status
             """)
             edges_raw = self.query("""
                 MATCH (a)-[r:USES|LEADS_TO|NEXT_STAGE]->(b)
@@ -491,7 +517,8 @@ class Neo4jClient:
                 WHERE coalesce(n.kg, 'timeseries') = 'timeseries'
                 RETURN n.name as name,
                        'Concept' as label_type,
-                       coalesce(n.description, '') as description
+                       coalesce(n.description, '') as description,
+                       coalesce(n.status, 'grey') as status
             """)
             edges_raw = self.query("""
                 MATCH (a:Concept)-[r:LEARN_BEFORE]->(b:Concept)
@@ -518,7 +545,8 @@ class Neo4jClient:
                   OR (n:Technique AND coalesce(n.kg, 'timeseries') = 'timeseries')
                 RETURN n.name as name,
                        labels(n)[0] as label_type,
-                       coalesce(n.description, n.family, n.use, '') as description
+                       coalesce(n.description, n.family, n.use, '') as description,
+                       coalesce(n.status, 'grey') as status
             """)
             edges_raw = self.query("""
                 MATCH (a)-[r]->(b)
@@ -540,12 +568,14 @@ class Neo4jClient:
             if node_id in seen_ids:
                 continue
             seen_ids.add(node_id)
+            status = node.get("status", "grey")
             cytoscape_nodes.append({
                 "data": {
                     "id":        node_id,
                     "label":     name,
                     "color":     type_colors.get(label_type, "#94A3B8"),
                     "node_type": label_type,
+                    "status":    status,
                     "tooltip":   f"[{label_type}] {name}" + (f"\n{desc[:80]}" if desc else ""),
                     "size":      size,
                 }
