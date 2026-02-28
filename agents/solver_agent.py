@@ -500,7 +500,7 @@ Return feedback that:
         })
 
         # 9. Update KG node color based on result
-        self._update_kg_node(concept, passed, attempt_count, weak_prereqs)
+        self._update_kg_node(concept, passed, attempt_count, weak_prereqs, kg=kg)
 
         return {
             "feedback_text": feedback_text,
@@ -552,7 +552,8 @@ Return feedback that:
         concept: str,
         passed: bool,
         attempt_count: int,
-        weak_prereqs: list
+        weak_prereqs: list,
+        kg: str = "fods"
     ):
         """Update the KG node color based on assessment result."""
 
