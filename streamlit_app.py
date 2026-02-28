@@ -341,35 +341,6 @@ def render_kg(kg_data: dict, height: int = 380):
     # Detect if this is a TS KG (has node_type like PipelineStage, Model, etc.)
     kg_view = st.session_state.get("kg_view", "fods")
 
-    # TS node type → colour mapping
-    TS_NODE_COLORS = {
-        "PipelineStage": "#F97316",  # orange  — backbone
-        "Model":         "#8B5CF6",  # purple  — models
-        "Technique":     "#3B82F6",  # blue    — techniques
-        "Concept":       "#06B6D4",  # cyan    — concepts
-        "Library":       "#10B981",  # green   — libraries
-        "EvalMetric":    "#EF4444",  # red     — metrics
-        "PredictionType":"#F59E0B",  # amber   — prediction types
-        "UseCase":       "#EC4899",  # pink    — use cases
-        "BestPractice":  "#22C55E",  # lime    — best practices
-        "AntiPattern":   "#DC2626",  # dark red— anti patterns
-        "LearningPath":  "#A855F7",  # violet  — learning paths
-    }
-
-    TS_NODE_SIZES = {
-        "PipelineStage": 26,
-        "Model":         18,
-        "LearningPath":  20,
-        "PredictionType":18,
-        "Technique":     12,
-        "Concept":       14,
-        "Library":       12,
-        "EvalMetric":    14,
-        "UseCase":       16,
-        "BestPractice":  14,
-        "AntiPattern":   14,
-    }
-
     nodes = []
     for n in nodes_data:
         d         = n["data"]
@@ -377,17 +348,12 @@ def render_kg(kg_data: dict, height: int = 380):
         node_type = d.get("node_type", "topic")
 
         if kg_view == "timeseries":
-            # Status colour takes priority — shows learning progress
-            # Falls back to node-type colour for unvisited nodes
-            if status and status != "grey":
-                color = STATUS_COLORS.get(status, TS_NODE_COLORS.get(node_type, "#9CA3AF"))
-            else:
-                color = TS_NODE_COLORS.get(node_type, "#9CA3AF")
-            size  = TS_NODE_SIZES.get(node_type, 14)
-            label = d["label"] if node_type in ("PipelineStage", "LearningPath", "PredictionType") \
+            # Same status colour system as FODS — grey until student makes progress
+            color = STATUS_COLORS.get(status, "#9CA3AF")
+            size  = 22 if node_type == "PipelineStage" else 12
+            label = d["label"] if node_type in ("PipelineStage", "LearningPath") \
                     else (d["label"][:14] + "…" if len(d["label"]) > 14 else d["label"])
-            status_label = STATUS_LABELS.get(status, "") if status and status != "grey" else ""
-            title = f"{d['label']} [{node_type}]" + (f" · {status_label}" if status_label else "")
+            title = f"{d['label']} [{node_type}] · {STATUS_LABELS.get(status, status)}"
         else:
             color = STATUS_COLORS.get(status, "#9CA3AF")
             size  = 22 if node_type == "topic" else 12
