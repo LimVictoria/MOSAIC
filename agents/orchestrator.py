@@ -18,6 +18,7 @@ class TutorState(TypedDict):
     assessment_result: dict
     next_action:       str
     re_teach_focus:    str
+    kg:                str    # active KG: 'fods' or 'timeseries'
 
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
@@ -219,7 +220,7 @@ class Orchestrator:
 
         return workflow.compile()
 
-    def route(self, student_id: str, message: str, history: list = None) -> str:
+    def route(self, student_id: str, message: str, history: list = None, kg: str = "fods") -> str:
         state = {
             "student_id":        student_id,
             "message":           message,
@@ -231,7 +232,8 @@ class Orchestrator:
             "question_data":     {},
             "assessment_result": {},
             "next_action":       "",
-            "re_teach_focus":    ""
+            "re_teach_focus":    "",
+            "kg":                kg,
         }
         result = self.graph.invoke(state)
         self.last_agent_used = result.get("agent_used", "Solver")
@@ -425,7 +427,8 @@ class Orchestrator:
             concept=state["concept"],
             focus=state.get("re_teach_focus") or None,
             message=state["message"],
-            history=state.get("history", [])
+            history=state.get("history", []),
+            kg=state.get("kg", "fods")
         )
         return {**state, "response": response, "agent_used": "Solver"}
 
@@ -451,7 +454,8 @@ class Orchestrator:
             concept=state["concept"],
             question=state.get("question_data", {}).get("question", ""),
             student_answer=state["message"],
-            assessment_result=state.get("assessment_result", {})
+            assessment_result=state.get("assessment_result", {}),
+            kg=state.get("kg", "fods")
         )
         return {
             **state,
