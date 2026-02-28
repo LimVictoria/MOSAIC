@@ -2,7 +2,7 @@
 # Explains concepts step by step
 
 from llm_client import LLMClient
-from rag import RAGRetriever
+from rag.retriever import RAGRetriever
 from neo4j_client import Neo4jClient
 from memory.letta_client import LettaClient
 
