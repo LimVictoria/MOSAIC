@@ -237,7 +237,11 @@ def call_chat(message: str) -> dict:
         return {"response": f"Error: {LOAD_ERROR}", "agent": "System"}
     try:
         orch     = components["orchestrator"]
-        response = orch.route(student_id=st.session_state.student_id, message=message)
+        response = orch.route(
+            student_id=st.session_state.student_id,
+            message=message,
+            kg=st.session_state.get("kg_view", "fods")
+        )
         return {"response": response, "agent": orch.last_agent_used}
     except Exception as e:
         return {"response": f"Agent error: {e}", "agent": "System"}
@@ -247,7 +251,9 @@ def call_get_question(concept: str) -> dict:
         return {}
     try:
         return components["assessment"].generate_question(
-            student_id=st.session_state.student_id, concept=concept)
+            student_id=st.session_state.student_id,
+            concept=concept,
+            kg=st.session_state.get("kg_view", "fods"))
     except Exception as e:
         st.error(f"Question error: {e}")
         return {}
@@ -332,36 +338,89 @@ def render_kg(kg_data: dict, height: int = 380):
         st.caption("⏳ Loading curriculum graph...")
         return
 
+    # Detect if this is a TS KG (has node_type like PipelineStage, Model, etc.)
+    kg_view = st.session_state.get("kg_view", "fods")
+
+    # TS node type → colour mapping
+    TS_NODE_COLORS = {
+        "PipelineStage": "#F97316",  # orange  — backbone
+        "Model":         "#8B5CF6",  # purple  — models
+        "Technique":     "#3B82F6",  # blue    — techniques
+        "Concept":       "#06B6D4",  # cyan    — concepts
+        "Library":       "#10B981",  # green   — libraries
+        "EvalMetric":    "#EF4444",  # red     — metrics
+        "PredictionType":"#F59E0B",  # amber   — prediction types
+        "UseCase":       "#EC4899",  # pink    — use cases
+        "BestPractice":  "#22C55E",  # lime    — best practices
+        "AntiPattern":   "#DC2626",  # dark red— anti patterns
+        "LearningPath":  "#A855F7",  # violet  — learning paths
+    }
+
+    TS_NODE_SIZES = {
+        "PipelineStage": 26,
+        "Model":         18,
+        "LearningPath":  20,
+        "PredictionType":18,
+        "Technique":     12,
+        "Concept":       14,
+        "Library":       12,
+        "EvalMetric":    14,
+        "UseCase":       16,
+        "BestPractice":  14,
+        "AntiPattern":   14,
+    }
+
     nodes = []
     for n in nodes_data:
         d         = n["data"]
         status    = d.get("status", "grey")
         node_type = d.get("node_type", "topic")
 
-        # Topic nodes are larger, Technique nodes are smaller
-        size = 22 if node_type == "topic" else 12
-
-        # Topic nodes show full label, Technique nodes truncate
-        label = d["label"] if node_type == "topic" else (d["label"][:15] + "..." if len(d["label"]) > 15 else d["label"])
+        if kg_view == "timeseries":
+            # Status colour takes priority — shows learning progress
+            # Falls back to node-type colour for unvisited nodes
+            if status and status != "grey":
+                color = STATUS_COLORS.get(status, TS_NODE_COLORS.get(node_type, "#9CA3AF"))
+            else:
+                color = TS_NODE_COLORS.get(node_type, "#9CA3AF")
+            size  = TS_NODE_SIZES.get(node_type, 14)
+            label = d["label"] if node_type in ("PipelineStage", "LearningPath", "PredictionType") \
+                    else (d["label"][:14] + "…" if len(d["label"]) > 14 else d["label"])
+            status_label = STATUS_LABELS.get(status, "") if status and status != "grey" else ""
+            title = f"{d['label']} [{node_type}]" + (f" · {status_label}" if status_label else "")
+        else:
+            color = STATUS_COLORS.get(status, "#9CA3AF")
+            size  = 22 if node_type == "topic" else 12
+            label = d["label"] if node_type == "topic" else (d["label"][:15] + "..." if len(d["label"]) > 15 else d["label"])
+            title = f"{d['label']} · {STATUS_LABELS.get(status, status)} · {node_type}"
 
         nodes.append(Node(
-            id=d["id"], label=label, size=size,
-            color=STATUS_COLORS.get(status, "#9CA3AF"),
-            title=f"{d['label']} · {STATUS_LABELS.get(status, status)} · {node_type}",
-            font={"color": "#1E293B", "size": 10 if node_type == "technique" else 12, "face": "JetBrains Mono"}
+            id=d["id"], label=label, size=size, color=color, title=title,
+            font={"color": "#1E293B", "size": 9 if size <= 14 else 11, "face": "JetBrains Mono"}
         ))
 
     edge_colors = {
-        "PREREQUISITE": "#EF4444",
-        "COVERS":       "#3B82F6",
-        "INCLUDES":     "#10B981",
-        "USES":         "#F59E0B",
-        "METHOD":       "#8B5CF6",
-        "MEASURES":     "#06B6D4",
-        "LEADS_TO":     "#F97316",
-        "COMPARED_TO":  "#94A3B8",
-        "REQUIRES":     "#EF4444",
-        "RELATED_TO":   "#94A3B8",
+        "PREREQUISITE":  "#EF4444",
+        "COVERS":        "#3B82F6",
+        "INCLUDES":      "#10B981",
+        "USES":          "#F59E0B",
+        "USED_IN":       "#F59E0B",
+        "IMPLEMENTS":    "#8B5CF6",
+        "METHOD":        "#8B5CF6",
+        "MEASURES":      "#06B6D4",
+        "LEADS_TO":      "#F97316",
+        "NEXT_STAGE":    "#F97316",
+        "SUITABLE_FOR":  "#A855F7",
+        "EVALUATED_BY":  "#EF4444",
+        "ADDRESSES":     "#06B6D4",
+        "LEARN_BEFORE":  "#94A3B8",
+        "APPLIES":       "#EC4899",
+        "APPLIES_TO":    "#22C55E",
+        "WARNS_ABOUT":   "#DC2626",
+        "RECOMMENDED_FOR":"#10B981",
+        "COMPARED_TO":   "#94A3B8",
+        "REQUIRES":      "#EF4444",
+        "RELATED_TO":    "#94A3B8",
     }
 
     edges = [
@@ -374,11 +433,14 @@ def render_kg(kg_data: dict, height: int = 380):
         ) for e in edges_data
     ]
 
+    # Tighter physics for TS (large graph) — stronger gravity pulls weak nodes in
+    d3_config = {"gravity": -120, "linkLength": 80} if kg_view == "timeseries"            else {"gravity": -300, "linkLength": 130}
+
     agraph(nodes=nodes, edges=edges, config=Config(
         width="100%", height=height, directed=True, physics=True,
         hierarchical=False, nodeHighlightBehavior=True,
         highlightColor="#059669",
-        d3={"gravity": -300, "linkLength": 130}
+        d3=d3_config
     ))
 
 # ─────────────────────────────────────────────────────
@@ -769,7 +831,8 @@ with col_left:
                         orch         = components["orchestrator"]
                         route_result = orch.route(
                             student_id=st.session_state.student_id,
-                            message=f"Explain {q}"
+                            message=f"Explain {q}",
+                            kg=st.session_state.get("kg_view", "fods")
                         )
                         answer = route_result if isinstance(route_result, str) else route_result.get("response", "")
                         if not answer:
