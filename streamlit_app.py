@@ -281,8 +281,8 @@ def get_kg_data() -> dict:
         neo4j = components["neo4j"]
         view  = st.session_state.get("kg_view", "fods")
         if view == "timeseries":
-            subview = st.session_state.get("kg_subview", "pipeline")
-            return neo4j.to_cytoscape_json_pipeline(view=subview)
+            # Always use full view in sidebar so no nodes appear isolated
+            return neo4j.to_cytoscape_json_pipeline(view="full")
         return neo4j.to_cytoscape_json()
     except Exception:
         return {"elements": {"nodes": [], "edges": []}, "node_count": 0, "visible": False}
@@ -622,20 +622,6 @@ with col_left:
             st.session_state.kg_data         = None  # clear stale data
             st.rerun()
 
-        if st.session_state.kg_view == "timeseries":
-            subview_choice = st.selectbox(
-                "Time Series View",
-                ["pipeline", "models", "concepts", "full"],
-                index=["pipeline", "models", "concepts", "full"].index(
-                    st.session_state.get("kg_subview", "pipeline")
-                ),
-                label_visibility="collapsed"
-            )
-            if subview_choice != st.session_state.get("kg_subview", "pipeline"):
-                st.session_state.kg_subview      = subview_choice
-                st.session_state.last_kg_refresh = 0
-                st.session_state.kg_data         = None  # clear stale data
-                st.rerun()
 
         st.markdown("---")
         st.markdown('<div class="panel-header">Export</div>', unsafe_allow_html=True)
