@@ -4,7 +4,7 @@
 
 import json
 from llm_client import LLMClient
-from neo4j_client import Neo4jClient
+from kg.neo4j_client import Neo4jClient
 from rag.retriever import RAGRetriever
 
 
