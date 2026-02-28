@@ -74,6 +74,7 @@ class Neo4jClient:
         now = datetime.now(timezone.utc).isoformat()
         cypher = """
         MATCH (t:Technique {name: $name})
+        WHERE coalesce(t.kg, 'fods') = 'fods'
         SET t.status = $status,
             t.updated_at = $now
         WITH t
@@ -134,7 +135,9 @@ class Neo4jClient:
     def get_curriculum_structure(self) -> list[dict]:
         cypher = """
         MATCH (t:Topic)
+        WHERE coalesce(t.kg, 'fods') = 'fods'
         OPTIONAL MATCH (t)-[:PREREQUISITE]->(pre:Topic)
+        WHERE coalesce(pre.kg, 'fods') = 'fods'
         RETURN t.name as topic,
                coalesce(t.status, 'grey') as status,
                collect(pre.name) as prerequisites
@@ -145,6 +148,8 @@ class Neo4jClient:
     def get_topic_techniques(self, topic_name: str) -> list[dict]:
         cypher = """
         MATCH (t:Topic {name: $name})-[]->(tech:Technique)
+        WHERE coalesce(t.kg, 'fods') = 'fods'
+          AND coalesce(tech.kg, 'fods') = 'fods'
         RETURN tech.name as name,
                coalesce(tech.status, 'grey') as status
         ORDER BY tech.name
@@ -176,11 +181,12 @@ class Neo4jClient:
     def get_next_recommended_topic(self) -> str:
         cypher = """
         MATCH (t:Topic)
-        WHERE coalesce(t.status, 'grey') <> 'green'
-        AND NOT EXISTS {
-            MATCH (t)-[:PREREQUISITE]->(pre:Topic)
-            WHERE coalesce(pre.status, 'grey') <> 'green'
-        }
+        WHERE coalesce(t.kg, 'fods') = 'fods'
+          AND coalesce(t.status, 'grey') <> 'green'
+          AND NOT EXISTS {
+              MATCH (t)-[:PREREQUISITE]->(pre:Topic)
+              WHERE coalesce(pre.status, 'grey') <> 'green'
+          }
         RETURN t.name as name
         ORDER BY t.name
         LIMIT 1
@@ -204,8 +210,9 @@ class Neo4jClient:
 
         cypher2 = """
         MATCH (tech:Technique)
-        WHERE toLower(tech.name) CONTAINS toLower($name)
-           OR toLower($name) CONTAINS toLower(tech.name)
+        WHERE coalesce(tech.kg, 'fods') = 'fods'
+          AND (toLower(tech.name) CONTAINS toLower($name)
+           OR toLower($name) CONTAINS toLower(tech.name))
         RETURN tech.name as name
         LIMIT 1
         """
@@ -220,7 +227,9 @@ class Neo4jClient:
     def get_node_count(self) -> int:
         """FODS KG: total Topic + Technique nodes."""
         result = self.query("""
-            MATCH (n) WHERE n:Topic OR n:Technique
+            MATCH (n)
+            WHERE (n:Topic OR n:Technique)
+              AND coalesce(n.kg, 'fods') = 'fods'
             RETURN count(n) as count
         """)
         return result[0]["count"] if result else 0
@@ -229,9 +238,10 @@ class Neo4jClient:
         """Time Series KG: total node count."""
         result = self.query("""
             MATCH (n)
-            WHERE n:PipelineStage OR n:Model OR n:Concept
-               OR n:EvalMetric OR n:BestPractice OR n:AntiPattern
-               OR n:UseCase OR n:LearningPath OR n:PredictionType
+            WHERE n:PipelineStage OR n:Model OR n:EvalMetric OR n:BestPractice
+               OR n:AntiPattern OR n:LearningPath OR n:PredictionType
+               OR (n:Concept AND coalesce(n.kg, 'timeseries') = 'timeseries')
+               OR (n:UseCase AND coalesce(n.kg, 'timeseries') = 'timeseries')
             RETURN count(n) as count
         """)
         return result[0]["count"] if result else 0
@@ -242,6 +252,7 @@ class Neo4jClient:
     def get_mastered_concepts(self, student_id: str = None) -> list[str]:
         results = self.query("""
             MATCH (t:Topic {status: 'green'})
+            WHERE coalesce(t.kg, 'fods') = 'fods'
             RETURN t.name as name
         """)
         return [r["name"] for r in results]
@@ -252,6 +263,7 @@ class Neo4jClient:
         return self.query("""
             MATCH (n)
             WHERE (n:Topic OR n:Technique)
+              AND coalesce(n.kg, 'fods') = 'fods'
               AND n.status = 'green'
               AND n.mastered_at IS NOT NULL
             RETURN n.name        AS name,
@@ -294,6 +306,7 @@ class Neo4jClient:
 
         topics = self.query("""
             MATCH (t:Topic)
+            WHERE coalesce(t.kg, 'fods') = 'fods'
             RETURN t.name as name,
                    coalesce(t.status, 'grey') as status,
                    coalesce(t.mastered_at, null) as mastered_at,
@@ -302,6 +315,7 @@ class Neo4jClient:
 
         techniques = self.query("""
             MATCH (t:Technique)
+            WHERE coalesce(t.kg, 'fods') = 'fods'
             RETURN t.name as name,
                    coalesce(t.status, 'grey') as status,
                    coalesce(t.mastered_at, null) as mastered_at,
@@ -311,6 +325,8 @@ class Neo4jClient:
         edges_result = self.query("""
             MATCH (a)-[r]->(b)
             WHERE (a:Topic OR a:Technique) AND (b:Topic OR b:Technique)
+              AND coalesce(a.kg, 'fods') = 'fods'
+              AND coalesce(b.kg, 'fods') = 'fods'
             RETURN a.name as source,
                    b.name as target,
                    type(r) as relationship
@@ -468,16 +484,21 @@ class Neo4jClient:
         elif view == "concepts":
             nodes_raw = self.query("""
                 MATCH (n:Concept)
+                WHERE coalesce(n.kg, 'timeseries') = 'timeseries'
                 RETURN n.name as name,
                        'Concept' as label_type,
                        coalesce(n.description, '') as description
             """)
             edges_raw = self.query("""
                 MATCH (a:Concept)-[r:LEARN_BEFORE]->(b:Concept)
+                WHERE coalesce(a.kg, 'timeseries') = 'timeseries'
+                  AND coalesce(b.kg, 'timeseries') = 'timeseries'
                 RETURN a.name as source, b.name as target,
                        'LEARN_BEFORE' as relationship
                 UNION
                 MATCH (t:Technique)-[r:ADDRESSES]->(c:Concept)
+                WHERE coalesce(t.kg, 'timeseries') = 'timeseries'
+                  AND coalesce(c.kg, 'timeseries') = 'timeseries'
                 RETURN t.name as source, c.name as target,
                        'ADDRESSES' as relationship
             """)
@@ -485,18 +506,21 @@ class Neo4jClient:
         else:  # full
             nodes_raw = self.query("""
                 MATCH (n)
-                WHERE n:PipelineStage OR n:Model OR n:Concept
-                   OR n:EvalMetric OR n:PredictionType OR n:UseCase
+                WHERE n:PipelineStage OR n:Model OR n:EvalMetric OR n:PredictionType
+                  OR (n:Concept   AND coalesce(n.kg, 'timeseries') = 'timeseries')
+                  OR (n:UseCase   AND coalesce(n.kg, 'timeseries') = 'timeseries')
                 RETURN n.name as name,
                        labels(n)[0] as label_type,
                        coalesce(n.description, n.family, '') as description
             """)
             edges_raw = self.query("""
                 MATCH (a)-[r]->(b)
-                WHERE (a:PipelineStage OR a:Model OR a:Concept
-                    OR a:EvalMetric OR a:PredictionType OR a:UseCase)
-                  AND (b:PipelineStage OR b:Model OR b:Concept
-                    OR b:EvalMetric OR b:PredictionType OR b:UseCase)
+                WHERE (a:PipelineStage OR a:Model OR a:EvalMetric OR a:PredictionType
+                  OR (a:Concept AND coalesce(a.kg, 'timeseries') = 'timeseries')
+                  OR (a:UseCase AND coalesce(a.kg, 'timeseries') = 'timeseries'))
+                  AND (b:PipelineStage OR b:Model OR b:EvalMetric OR b:PredictionType
+                  OR (b:Concept AND coalesce(b.kg, 'timeseries') = 'timeseries')
+                  OR (b:UseCase AND coalesce(b.kg, 'timeseries') = 'timeseries'))
                 RETURN a.name as source, b.name as target,
                        type(r) as relationship
                 LIMIT 300
