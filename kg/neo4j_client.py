@@ -89,7 +89,9 @@ class Neo4jClient:
         now = datetime.now(timezone.utc).isoformat()
         cypher = """
         MATCH (n)
-        WHERE (n:Topic OR n:Technique) AND n.name = $name
+        WHERE (n:Topic OR n:Technique)
+          AND n.name = $name
+          AND coalesce(n.kg, 'fods') = 'fods'
         SET n.status = $status,
             n.updated_at = $now
         WITH n
@@ -278,7 +280,9 @@ class Neo4jClient:
         for name in mastered_concepts:
             self.query("""
                 MATCH (n)
-                WHERE (n:Topic OR n:Technique) AND n.name = $name
+                WHERE (n:Topic OR n:Technique)
+                  AND n.name = $name
+                  AND coalesce(n.kg, 'fods') = 'fods'
                   AND coalesce(n.status, 'grey') <> 'green'
                 SET n.status = 'green',
                     n.mastered_at = $ts,
