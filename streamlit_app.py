@@ -81,8 +81,7 @@ section[data-testid="collapsedControl"] { visibility: visible !important; displa
 .tag-solver     { background: #DBEAFE; color: #1D4ED8; border: 1px solid #93C5FD; }
 .tag-assessment { background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; }
 .tag-feedback   { background: #F3E8FF; color: #6B21A8; border: 1px solid #D8B4FE; }
-.tag-system      { background: #DCFCE7; color: #166534; border: 1px solid #86EFAC; }
-.tag-recommender { background: #FFF7ED; color: #C2410C; border: 1px solid #FDBA74; }
+.tag-system     { background: #DCFCE7; color: #166534; border: 1px solid #86EFAC; }
 .panel-header {
     font-size: 0.6rem;
     font-weight: 700;
@@ -146,7 +145,6 @@ def load_components():
     from rag.retriever import RAGRetriever
     from kg.neo4j_client import Neo4jClient
     from agents.solver_agent import SolverAgent
-    from agents.recommender_agent import RecommenderAgent
     from agents.assessment_agent import AssessmentAgent
     from agents.feedback_agent import FeedbackAgent
     from agents.orchestrator import Orchestrator
@@ -157,13 +155,12 @@ def load_components():
     neo4j        = Neo4jClient()
     letta        = LettaClient()
     solver       = SolverAgent(llm, retriever, neo4j, letta)
-    recommender  = RecommenderAgent(llm, retriever, neo4j, letta)
     assessment   = AssessmentAgent(llm, retriever, neo4j, letta)
     feedback     = FeedbackAgent(llm, retriever, neo4j, letta)
-    orchestrator = Orchestrator(solver, recommender, assessment, feedback, neo4j, letta)
+    orchestrator = Orchestrator(solver, assessment, feedback, neo4j, letta)
     return {
         "llm": llm, "embedder": embedder, "retriever": retriever, "neo4j": neo4j, "letta": letta,
-        "solver": solver, "recommender": recommender, "assessment": assessment,
+        "solver": solver, "assessment": assessment,
         "feedback": feedback, "orchestrator": orchestrator,
     }
 
@@ -190,11 +187,10 @@ STATUS_LABELS = {
     "green": "Mastered ✓", "red": "Needs review", "orange": "Prereq gap",
 }
 AGENT_TAGS = {
-    "Solver":      ("SOLVER",    "tag-solver"),
-    "Recommender": ("RECOMMEND", "tag-recommender"),
-    "Assessment":  ("ASSESS",    "tag-assessment"),
-    "Feedback":    ("FEEDBACK",  "tag-feedback"),
-    "System":      ("SYSTEM",    "tag-system"),
+    "Solver":     ("SOLVER",   "tag-solver"),
+    "Assessment": ("ASSESS",   "tag-assessment"),
+    "Feedback":   ("FEEDBACK", "tag-feedback"),
+    "System":     ("SYSTEM",   "tag-system"),
 }
 
 # ─────────────────────────────────────────────────────
@@ -207,8 +203,6 @@ for key, val in {
     "kg_data": None, "kg_visible": False, "last_kg_refresh": 0,
     "response_style": "Balanced", "difficulty_override": "Auto",
     "ingestion_done": False,
-    "kg_view": "FODS Curriculum",
-    "ts_kg_subview": "pipeline",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -219,6 +213,18 @@ if COMPONENTS_LOADED and not st.session_state["ingestion_done"]:
         from rag.fetch_docs import run_ingestion
         run_ingestion()
     st.session_state["ingestion_done"] = True
+
+# Sync Letta mastery → Neo4j on every session start (restores colours after DB wipe)
+if COMPONENTS_LOADED and "kg_synced" not in st.session_state:
+    try:
+        letta  = components["letta"]
+        neo4j  = components["neo4j"]
+        mastered = letta.get_mastered_concepts(st.session_state.student_id)
+        if mastered:
+            neo4j.sync_mastery_from_letta(mastered)
+    except Exception:
+        pass  # Don't block app startup if sync fails
+    st.session_state["kg_synced"] = True
 
 # ─────────────────────────────────────────────────────
 # Agent helpers
@@ -269,12 +275,7 @@ def get_kg_data() -> dict:
     if not COMPONENTS_LOADED:
         return {"elements": {"nodes": [], "edges": []}, "node_count": 0, "visible": False}
     try:
-        kg_view = st.session_state.get("kg_view", "FODS Curriculum")
-        if kg_view == "FODS Curriculum":
-            return components["neo4j"].to_cytoscape_json()
-        else:
-            subview = st.session_state.get("ts_kg_subview", "pipeline")
-            return components["neo4j"].to_cytoscape_json_pipeline(view=subview)
+        return components["neo4j"].to_cytoscape_json()
     except Exception:
         return {"elements": {"nodes": [], "edges": []}, "node_count": 0, "visible": False}
 
@@ -392,70 +393,40 @@ st.markdown("---")
 # SIDEBAR — Knowledge Graph
 # ─────────────────────────────────────────────────────
 with st.sidebar:
-    kg_view  = st.session_state.get("kg_view", "FODS Curriculum")
-    kg_label = "Knowledge Graph" if kg_view == "FODS Curriculum" else "Time Series KG"
-    st.markdown(f'<div class="panel-header">{kg_label}</div>', unsafe_allow_html=True)
+    st.markdown('<div class="panel-header">Knowledge Graph</div>', unsafe_allow_html=True)
 
-    now          = time.time()
-    last_view    = st.session_state.get("_last_kg_view", "")
-    view_changed = last_view != kg_view
-    if view_changed or now - st.session_state.last_kg_refresh > 5:
+    now = time.time()
+    if now - st.session_state.last_kg_refresh > 5:
         kg                               = get_kg_data()
         st.session_state.kg_data         = kg
         st.session_state.kg_visible      = kg.get("visible", False)
         st.session_state.last_kg_refresh = now
-        st.session_state["_last_kg_view"] = kg_view
 
     node_count = st.session_state.kg_data.get("node_count", 0) if st.session_state.kg_data else 0
+    st.caption(f"🕸️ {node_count} curriculum nodes")
 
-    if kg_view == "FODS Curriculum":
-        st.caption(f"🕸️ {node_count} curriculum nodes")
-        if st.session_state.kg_data and node_count > 0:
-            leg_cols = st.columns(2)
-            for i, (status, slabel) in enumerate(STATUS_LABELS.items()):
-                with leg_cols[i % 2]:
-                    st.markdown(
-                        f'<div style="display:flex;align-items:center;gap:0.25rem;margin-bottom:0.4rem">' +
-                        f'<div style="width:8px;height:8px;border-radius:50%;' +
-                        f'background:{STATUS_COLORS[status]};flex-shrink:0"></div>' +
-                        f'<span style="font-size:0.57rem;color:#64748B;white-space:nowrap">{slabel}</span></div>',
-                        unsafe_allow_html=True)
-            render_kg(st.session_state.kg_data, height=420)
-            st.caption("💡 Right-click → Save image as... to export PNG")
-        else:
-            st.markdown("""
-            <div style="text-align:center;padding:2rem 1rem;color:#94A3B8">
-                <div style="font-size:1.8rem">🕸️</div>
-                <div style="font-size:0.72rem;margin-top:0.5rem">
-                Curriculum graph loading...<br>Graph appears after 2+ concepts are indexed
-                </div>
-            </div>""", unsafe_allow_html=True)
-    else:
-        ts_view = st.session_state.get("ts_kg_subview", "pipeline")
-        view_labels = {"pipeline": "Pipeline (9 stages)", "models": "Stages + Models",
-                       "concepts": "Concepts", "full": "Full graph"}
-        st.caption(f"🕸️ {node_count} nodes · {view_labels.get(ts_view, ts_view)}")
-        ts_legend = [("#0284C7","Pipeline Stage"),("#7C3AED","Model"),
-                     ("#059669","Concept"),("#D97706","Eval Metric")]
+    if st.session_state.kg_data and st.session_state.kg_data.get("node_count", 0) > 0:
         leg_cols = st.columns(2)
-        for i, (color, label) in enumerate(ts_legend):
+        for i, (status, slabel) in enumerate(STATUS_LABELS.items()):
             with leg_cols[i % 2]:
                 st.markdown(
-                    f'<div style="display:flex;align-items:center;gap:0.25rem;margin-bottom:0.4rem">' +
-                    f'<div style="width:8px;height:8px;border-radius:50%;background:{color};flex-shrink:0"></div>' +
-                    f'<span style="font-size:0.57rem;color:#64748B;white-space:nowrap">{label}</span></div>',
+                    f'<div style="display:flex;align-items:center;gap:0.25rem;margin-bottom:0.4rem">'
+                    f'<div style="width:8px;height:8px;border-radius:50%;'
+                    f'background:{STATUS_COLORS[status]};flex-shrink:0"></div>'
+                    f'<span style="font-size:0.57rem;color:#64748B;white-space:nowrap">{slabel}</span></div>',
                     unsafe_allow_html=True)
-        if st.session_state.kg_data and node_count > 0:
-            render_kg(st.session_state.kg_data, height=420)
-            st.caption("💡 Change view in ⚙️ Settings → Knowledge Graph")
-        else:
-            st.markdown("""
-            <div style="text-align:center;padding:2rem 1rem;color:#94A3B8">
-                <div style="font-size:1.8rem">🔬</div>
-                <div style="font-size:0.72rem;margin-top:0.5rem">
-                Time Series KG not loaded yet.<br>Push the Cypher script to Neo4j first.
-                </div>
-            </div>""", unsafe_allow_html=True)
+
+        render_kg(st.session_state.kg_data, height=420)
+        st.caption("💡 Right-click → Save image as... to export PNG")
+    else:
+        st.markdown("""
+        <div style="text-align:center;padding:2rem 1rem;color:#94A3B8">
+            <div style="font-size:1.8rem">🕸️</div>
+            <div style="font-size:0.72rem;margin-top:0.5rem">
+            Curriculum graph loading...
+                Graph appears after 2+ concepts are indexed
+            </div>
+        </div>""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────
 # MAIN LAYOUT
@@ -495,22 +466,10 @@ with col_left:
         # Shows topics student hasn't mastered yet, starting from prerequisites
         def get_quick_topics() -> list[str]:
             """
-            Return suggested topics based on which KG is active.
-            Time Series KG: pipeline-stage entry questions.
-            FODS KG:        unmastered prerequisites first.
+            Return suggested topics based on student progress.
+            Prioritises unmastered prerequisite topics first.
+            Falls back to curriculum starting topics if nothing in memory.
             """
-            kg_view = st.session_state.get("kg_view", "FODS Curriculum")
-
-            if kg_view == "Time Series Pipeline":
-                return [
-                    "What does the data ingestion stage involve for time series?",
-                    "How do I perform EDA on time series data?",
-                    "What preprocessing steps are needed for time series?",
-                    "What is temporal train-test splitting and why does it matter?",
-                    "What feature engineering methods are used in time series?",
-                    "How do I choose between LSTM, TFT, and N-BEATS?",
-                ]
-
             default_topics = [
                 "How do I read a CSV file in Python?",
                 "What is a DataFrame?",
@@ -522,9 +481,15 @@ with col_left:
             if not COMPONENTS_LOADED:
                 return default_topics
             try:
-                mastered   = components["letta"].get_mastered_concepts(st.session_state.student_id)
+                mastered = components["letta"].get_mastered_concepts(
+                    st.session_state.student_id)
+                # Get next recommended topic from curriculum KG
                 next_topic = components["neo4j"].get_next_recommended_topic()
-                unmastered = components["neo4j"].get_unmastered_prerequisites(next_topic) if next_topic else []
+                # Get unmastered prerequisites for next topic
+                unmastered = components["neo4j"].get_unmastered_prerequisites(
+                    next_topic) if next_topic else []
+
+                # Build prompt suggestions from unmastered topics
                 topic_to_prompt = {
                     "Python for Data Science":     "What Python libraries do I need for data science?",
                     "Reading Structured Files":    "How do I read a CSV file in Python?",
@@ -538,26 +503,33 @@ with col_left:
                     "Preprocessing Summary":       "What is a data preprocessing pipeline?",
                     "ML Frameworks":               "What is the difference between PyTorch and TensorFlow?",
                 }
+
                 suggestions = []
+                # Add unmastered prereqs first (most important)
                 for topic in unmastered:
                     if topic in topic_to_prompt and topic not in mastered:
                         suggestions.append(topic_to_prompt[topic])
+
+                # Add next recommended topic
                 if next_topic and next_topic in topic_to_prompt:
-                    p = topic_to_prompt[next_topic]
-                    if p not in suggestions:
-                        suggestions.append(p)
-                for topic, p in topic_to_prompt.items():
-                    if len(suggestions) >= 6: break
-                    if topic not in mastered and p not in suggestions:
-                        suggestions.append(p)
+                    prompt = topic_to_prompt[next_topic]
+                    if prompt not in suggestions:
+                        suggestions.append(prompt)
+
+                # Fill remaining slots with unmastered topics in order
+                for topic, prompt in topic_to_prompt.items():
+                    if len(suggestions) >= 6:
+                        break
+                    if topic not in mastered and prompt not in suggestions:
+                        suggestions.append(prompt)
+
                 return suggestions[:6] if suggestions else default_topics
             except Exception:
                 return default_topics
 
-        quick_prompts   = get_quick_topics()
-        kg_view         = st.session_state.get("kg_view", "FODS Curriculum")
-        suggested_label = "Suggested topics" if kg_view == "FODS Curriculum" else "Time series topics"
-        st.markdown(f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:0.5rem">{suggested_label}</div>', unsafe_allow_html=True)
+        quick_prompts = get_quick_topics()
+
+        st.markdown('<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:0.5rem">Suggested topics</div>', unsafe_allow_html=True)
         qc1, qc2 = st.columns(2)
         for i, prompt in enumerate(quick_prompts):
             col = qc1 if i % 2 == 0 else qc2
@@ -626,45 +598,6 @@ with col_left:
             label_visibility="collapsed"
         )
         st.caption("Auto uses your learning history to set the level.")
-
-        st.markdown("---")
-        st.markdown('<div class="panel-header">Knowledge Graph View</div>', unsafe_allow_html=True)
-        st.caption("Switch which graph is shown in the sidebar and adjusts suggested topics.")
-
-        kg_view_options = ["FODS Curriculum", "Time Series Pipeline"]
-        current_kg_view = st.session_state.get("kg_view", "FODS Curriculum")
-        new_kg_view = st.selectbox(
-            "Select knowledge graph",
-            kg_view_options,
-            index=kg_view_options.index(current_kg_view),
-            label_visibility="collapsed",
-            key="kg_view_selector"
-        )
-        if new_kg_view != current_kg_view:
-            st.session_state["kg_view"] = new_kg_view
-            st.session_state["last_kg_refresh"] = 0
-            st.rerun()
-
-        if st.session_state.get("kg_view") == "Time Series Pipeline":
-            ts_subview_options = {
-                "pipeline": "🔷 Pipeline stages only (9 nodes)",
-                "models":   "🤖 Stages + Models",
-                "concepts": "💡 Concepts map",
-                "full":     "🌐 Full graph (heavy)",
-            }
-            current_subview = st.session_state.get("ts_kg_subview", "pipeline")
-            new_subview = st.selectbox(
-                "Time Series KG detail level",
-                list(ts_subview_options.keys()),
-                format_func=lambda k: ts_subview_options[k],
-                index=list(ts_subview_options.keys()).index(current_subview),
-                label_visibility="collapsed",
-                key="ts_subview_selector"
-            )
-            if new_subview != current_subview:
-                st.session_state["ts_kg_subview"] = new_subview
-                st.session_state["last_kg_refresh"] = 0
-                st.rerun()
 
         st.markdown("---")
         st.markdown('<div class="panel-header">Export</div>', unsafe_allow_html=True)
