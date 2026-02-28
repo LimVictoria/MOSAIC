@@ -1,50 +1,548 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// TIME SERIES KG — ADD kg:'timeseries' TAGS
-//
-// Run this in AuraDB AFTER you've already pushed the TS Cypher script.
-// This tags all existing TS nodes so they don't bleed into the FODS sidebar.
-//
-// Run each statement separately in the Neo4j Browser.
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// TIME SERIES END-TO-END PREDICTION KNOWLEDGE GRAPH — SINGLE TRANSACTION
+// Paste entire script into AuraDB browser and run once.
+// All nodes and relationships created in one go — no MATCH needed.
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// ── 1. Labels that ONLY exist in the TS KG (safe, no overlap) ──────────────
-MATCH (n)
-WHERE n:PipelineStage OR n:Model OR n:EvalMetric
-   OR n:BestPractice OR n:AntiPattern
-   OR n:LearningPath OR n:PredictionType
-SET n.kg = 'timeseries'
-RETURN 'Tagged TS-exclusive nodes' AS result, count(n) AS count;
+CREATE
 
-// ── 2. Technique — TS ones have a 'stage' property, FODS ones don't ────────
-MATCH (n:Technique)
-WHERE n.stage IS NOT NULL
-SET n.kg = 'timeseries'
-RETURN 'Tagged TS Technique nodes' AS result, count(n) AS count;
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE STAGE NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(stageIngest:PipelineStage     { name: "Data Ingestion",           order: 1,  kg: "timeseries", description: "Collecting raw time series data from various sources" }),
+(stageEDA:PipelineStage        { name: "Exploratory Data Analysis", order: 2,  kg: "timeseries", description: "Understanding structure, quality, and patterns in the time series" }),
+(stagePreprocess:PipelineStage { name: "Preprocessing",             order: 3,  kg: "timeseries", description: "Cleaning, aligning, and transforming data for modelling" }),
+(stageSampling:PipelineStage   { name: "Sampling & Windowing",      order: 4,  kg: "timeseries", description: "Creating supervised learning samples from sequential data" }),
+(stageAugment:PipelineStage    { name: "Data Augmentation",         order: 5,  kg: "timeseries", description: "Expanding training set to improve generalisation" }),
+(stageFeature:PipelineStage    { name: "Feature Engineering",       order: 6,  kg: "timeseries", description: "Deriving informative features from raw time series" }),
+(stageModel:PipelineStage      { name: "Modelling",                 order: 7,  kg: "timeseries", description: "Selecting, building, and training prediction models" }),
+(stageEval:PipelineStage       { name: "Evaluation",                order: 8,  kg: "timeseries", description: "Measuring model performance with appropriate metrics" }),
+(stageDeploy:PipelineStage     { name: "Deployment & Monitoring",   order: 9,  kg: "timeseries", description: "Serving predictions and monitoring for drift in production" }),
 
-// ── 3. Concept — TS ones have 'why_it_matters', FODS ones don't ────────────
-MATCH (n:Concept)
-WHERE n.why_it_matters IS NOT NULL
-SET n.kg = 'timeseries'
-RETURN 'Tagged TS Concept nodes' AS result, count(n) AS count;
+// ─────────────────────────────────────────────────────────────────────────────
+// CONCEPT NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(cStationarity:Concept     { kg: "timeseries", name: "Stationarity",                       why_it_matters: "Non-stationary data causes spurious regressions and invalid statistical inference",         description: "A stationary time series has constant mean, variance, and autocovariance over time." }),
+(cTrend:Concept            { kg: "timeseries", name: "Trend",                              why_it_matters: "Unremoved trend violates stationarity and inflates model error",                            description: "Long-term systematic increase or decrease in the level of a time series" }),
+(cSeasonality:Concept      { kg: "timeseries", name: "Seasonality",                        why_it_matters: "Ignored seasonality leads to systematic forecast bias",                                    description: "Periodic, predictable fluctuations occurring at fixed known intervals" }),
+(cCyclicality:Concept      { kg: "timeseries", name: "Cyclicality",                        why_it_matters: "Cyclic patterns require longer historical data to learn and are harder to forecast",       description: "Long-period fluctuations NOT of fixed frequency, driven by economic or systemic forces" }),
+(cNoise:Concept            { kg: "timeseries", name: "Irregular / Noise",                  why_it_matters: "Distinguishing signal from noise prevents overfitting",                                    description: "Random, unpredictable residual variation after removing trend, seasonality, and cyclicality" }),
+(cAutocorrelation:Concept  { kg: "timeseries", name: "Autocorrelation",                    why_it_matters: "Quantifies temporal dependency; guides lag selection for AR models and features",          description: "Correlation of a time series with its own past values at various lags" }),
+(cPACF:Concept             { kg: "timeseries", name: "Partial Autocorrelation",            why_it_matters: "Identifies direct lag relationships; used to determine AR order p",                       description: "Correlation between a series and its lag after removing the effect of shorter lags" }),
+(cLeakage:Concept          { kg: "timeseries", name: "Data Leakage",                       why_it_matters: "Most common cause of overly optimistic time series models",                                description: "Future information inadvertently used during training" }),
+(cCovariate:Concept        { kg: "timeseries", name: "Exogenous Variables / Covariates",   why_it_matters: "Can significantly improve forecast accuracy when correlated with the target",             description: "External variables that influence the target series but are not predicted by the model" }),
+(cMultivariate:Concept     { kg: "timeseries", name: "Multivariate Time Series",           why_it_matters: "Requires joint modelling to capture cross-variable dependencies",                         description: "Multiple interdependent time series observed simultaneously" }),
+(cIrregular:Concept        { kg: "timeseries", name: "Irregular Sampling",                 why_it_matters: "Most standard models require regular intervals; requires resampling or specialised methods", description: "Time series where observations are not equally spaced in time" }),
+(cLookback:Concept         { kg: "timeseries", name: "Lookback Window",                    why_it_matters: "Too short loses context; too long adds noise and increases computation",                   description: "The number of past time steps fed as input to the model for each prediction" }),
+(cHorizon:Concept          { kg: "timeseries", name: "Forecast Horizon",                   why_it_matters: "Longer horizons accumulate error; strategy choice depends on horizon",                    description: "How many future steps ahead the model predicts" }),
+(cDrift:Concept            { kg: "timeseries", name: "Concept Drift",                      why_it_matters: "Deployed models degrade silently without drift monitoring and retraining",                 description: "Change in the statistical properties of the target variable over time" }),
+(cUnitRoot:Concept         { kg: "timeseries", name: "Unit Root",                          why_it_matters: "Unit root processes must be differenced to achieve stationarity for ARIMA-family models",  description: "A characteristic of non-stationary processes where shocks have permanent effects" }),
+(cImbalanceTS:Concept      { kg: "timeseries", name: "Class Imbalance in Time Series",     why_it_matters: "Models default to predicting majority class; precision/recall on minority class is what matters", description: "Rare events vastly outnumbered by normal-operation samples" }),
+(cCausality:Concept        { kg: "timeseries", name: "Granger Causality",                  why_it_matters: "Helps select relevant exogenous features and understand system dynamics",                 description: "Series X Granger-causes Y if past values of X improve prediction of Y beyond Y's own past" }),
+(cRUL:Concept              { kg: "timeseries", name: "Remaining Useful Life (RUL)",        why_it_matters: "Core target for predictive maintenance; requires monotonically constrained regression",   description: "Estimated time remaining before a component or system fails" }),
+(cChangePoint:Concept      { kg: "timeseries", name: "Change Point",                       why_it_matters: "Undetected change points corrupt model training; must be segmented or modelled explicitly", description: "A time point where the statistical properties of the series abruptly change" }),
+(cAnomalyTypes:Concept     { kg: "timeseries", name: "Anomaly Types",                      why_it_matters: "Different types require different detection strategies",                                   description: "Point anomaly, contextual anomaly, collective anomaly" }),
+(cTemporalDep:Concept      { kg: "timeseries", name: "Temporal Dependency",                why_it_matters: "Violates i.i.d. assumption of classical ML; requires temporal-aware train/test splits",   description: "Observations close in time are more correlated than observations far apart" }),
+(cNormalization:Concept    { kg: "timeseries", name: "Normalization / Scaling",            why_it_matters: "Especially critical for RNNs and distance-based models; must be fit only on training data", description: "Transforming feature values to a common scale" }),
 
-// ── 4. Library — TS ones have 'use' property, FODS ones have 'version' ─────
-MATCH (n:Library)
-WHERE n.use IS NOT NULL
-SET n.kg = 'timeseries'
-RETURN 'Tagged TS Library nodes' AS result, count(n) AS count;
+// ─────────────────────────────────────────────────────────────────────────────
+// EDA TECHNIQUE NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(tTimeplot:Technique     { kg: "timeseries", stage: "EDA", name: "Time Series Line Plot",           python_function: "df.plot()",                                        use_case: "First visual inspection of raw series",              limitation: "Hard to interpret when many series are overlaid" }),
+(tACF:Technique          { kg: "timeseries", stage: "EDA", name: "ACF Plot",                        python_function: "plot_acf(series, lags=40)",                         use_case: "Reveal seasonality lags and MA order q",             limitation: "Affected by trend; difference first" }),
+(tPACF:Technique         { kg: "timeseries", stage: "EDA", name: "PACF Plot",                       python_function: "plot_pacf(series, lags=40)",                        use_case: "Identify AR order p for ARIMA",                      limitation: "Only valid for stationary series" }),
+(tADF:Technique          { kg: "timeseries", stage: "EDA", name: "Augmented Dickey-Fuller Test",    python_function: "adfuller(series)",                                  use_case: "Test for unit root / non-stationarity",              limitation: "Low power on short series" }),
+(tKPSS:Technique         { kg: "timeseries", stage: "EDA", name: "KPSS Test",                       python_function: "kpss(series)",                                      use_case: "Complement to ADF — null is stationarity",           limitation: "Sensitive to lag window selection" }),
+(tSeasonDecomp:Technique { kg: "timeseries", stage: "EDA", name: "Seasonal Decomposition",          python_function: "seasonal_decompose(series)",                        use_case: "Visually separate trend, seasonal, residual",        limitation: "Assumes constant seasonal amplitude" }),
+(tSTL:Technique          { kg: "timeseries", stage: "EDA", name: "STL Decomposition",               python_function: "STL(series, period=12).fit()",                      use_case: "Robust seasonal decomposition",                      limitation: "Seasonal period must be specified" }),
+(tRollingStats:Technique { kg: "timeseries", stage: "EDA", name: "Rolling Mean & Std Dev",          python_function: "df.rolling(12).mean()",                             use_case: "Visual stationarity check",                          limitation: "Window size choice affects interpretation" }),
+(tLagPlot:Technique      { kg: "timeseries", stage: "EDA", name: "Lag Plot",                        python_function: "pd.plotting.lag_plot(series)",                      use_case: "Visualise autocorrelation at a specific lag",        limitation: "Shows only one lag at a time" }),
+(tIQR:Technique          { kg: "timeseries", stage: "EDA", name: "IQR Outlier Detection",           python_function: "Q1, Q3 = series.quantile([0.25, 0.75])",            use_case: "Flag statistical outliers beyond 1.5xIQR",           limitation: "Not temporal-context-aware" }),
+(tZScore:Technique       { kg: "timeseries", stage: "EDA", name: "Z-Score Outlier Detection",       python_function: "zscore(series)",                                    use_case: "Flag values N std devs from mean",                   limitation: "Assumes normality" }),
+(tMissingPat:Technique   { kg: "timeseries", stage: "EDA", name: "Missing Value Pattern Analysis",  python_function: "msno.matrix(df)",                                   use_case: "Identify MCAR, MAR, MNAR patterns",                  limitation: "MNAR cannot be verified from data alone" }),
+(tHistogram:Technique    { kg: "timeseries", stage: "EDA", name: "Histogram / KDE Plot",            python_function: "sns.histplot(series, kde=True)",                    use_case: "Understand value distribution",                      limitation: "Does not capture temporal ordering" }),
+(tCrossCorr:Technique    { kg: "timeseries", stage: "EDA", name: "Cross-Correlation Plot",          python_function: "plt.xcorr(series1, series2)",                       use_case: "Measure lag relationship between two series",        limitation: "Spurious correlations with non-stationary series" }),
+(tGranger:Technique      { kg: "timeseries", stage: "EDA", name: "Granger Causality Test",          python_function: "grangercausalitytests(data, maxlag=5)",              use_case: "Determine if one series helps predict another",      limitation: "Statistical causality only" }),
+(tCPDetect:Technique     { kg: "timeseries", stage: "EDA", name: "Change Point Detection",          python_function: "rpt.Pelt().fit(signal).predict(pen=3)",              use_case: "Locate structural breaks in mean or variance",       limitation: "Multiple algorithms disagree; hyperparameter sensitive" }),
 
-// ── 5. UseCase — TS ones have 'benchmark_dataset', FODS ones don't ─────────
-MATCH (n:UseCase)
-WHERE n.benchmark_dataset IS NOT NULL
-SET n.kg = 'timeseries'
-RETURN 'Tagged TS UseCase nodes' AS result, count(n) AS count;
+// ─────────────────────────────────────────────────────────────────────────────
+// PREPROCESSING TECHNIQUE NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(tResample:Technique     { kg: "timeseries", stage: "Preprocessing", name: "Resampling / Frequency Alignment",        python_function: "df.resample('1H').mean()",               use_case: "Convert irregular series to uniform intervals",      limitation: "Upsampling creates artificial values" }),
+(tDiff:Technique         { kg: "timeseries", stage: "Preprocessing", name: "Differencing",                             python_function: "series.diff(1)",                           use_case: "Remove trend and achieve stationarity",              limitation: "Over-differencing inflates variance" }),
+(tLog:Technique          { kg: "timeseries", stage: "Preprocessing", name: "Log Transform",                            python_function: "np.log1p(series)",                         use_case: "Stabilise multiplicative variance",                  limitation: "Fails on zero or negative values" }),
+(tBoxCox:Technique       { kg: "timeseries", stage: "Preprocessing", name: "Box-Cox Transform",                        python_function: "boxcox(series)",                           use_case: "Parametric variance-stabilising transformation",     limitation: "Requires positive values" }),
+(tMinMax:Technique       { kg: "timeseries", stage: "Preprocessing", name: "Min-Max Scaling",                          python_function: "MinMaxScaler().fit_transform(X_train)",    use_case: "Scale features to [0,1] for LSTM stability",         limitation: "Sensitive to outliers" }),
+(tZStd:Technique         { kg: "timeseries", stage: "Preprocessing", name: "Z-Score Standardisation",                  python_function: "StandardScaler().fit_transform(X_train)",  use_case: "Zero mean, unit variance scaling",                   limitation: "Outliers distort mean and std" }),
+(tRobust:Technique       { kg: "timeseries", stage: "Preprocessing", name: "Robust Scaling",                           python_function: "RobustScaler().fit_transform(X_train)",    use_case: "Scale using median and IQR; robust to outliers",     limitation: "Does not bound values to a fixed range" }),
+(tSmoothMA:Technique     { kg: "timeseries", stage: "Preprocessing", name: "Moving Average Smoothing",                 python_function: "series.rolling(7).mean()",                 use_case: "Reduce high-frequency noise",                        limitation: "Introduces lag; removes peaks" }),
+(tEWMA:Technique         { kg: "timeseries", stage: "Preprocessing", name: "Exponentially Weighted Moving Average",    python_function: "series.ewm(span=7).mean()",                use_case: "Noise smoothing with more weight on recent values",  limitation: "Alpha parameter requires tuning" }),
+(tSavitzky:Technique     { kg: "timeseries", stage: "Preprocessing", name: "Savitzky-Golay Filter",                   python_function: "savgol_filter(series, 11, 2)",             use_case: "Polynomial smoothing that preserves peak shape",     limitation: "Window length and polynomial order must be chosen carefully" }),
+(tClip:Technique         { kg: "timeseries", stage: "Preprocessing", name: "Outlier Clipping / Winsorisation",         python_function: "series.clip(lower=p01, upper=p99)",        use_case: "Cap extreme values at percentile bounds",            limitation: "Information loss; may mask real fault signatures" }),
+(tDetrend:Technique      { kg: "timeseries", stage: "Preprocessing", name: "Detrending",                               python_function: "detrend(series)",                          use_case: "Remove deterministic trend",                         limitation: "OLS detrending assumes linear trend" }),
+(tDeseason:Technique     { kg: "timeseries", stage: "Preprocessing", name: "Deseasoning",                              python_function: "series.diff(seasonal_period)",             use_case: "Remove seasonal component",                          limitation: "Requires known seasonality period" }),
+(tTimeAlign:Technique    { kg: "timeseries", stage: "Preprocessing", name: "Time Index Alignment",                     python_function: "pd.merge_asof()",                          use_case: "Synchronise multiple sensors to common timestamp",   limitation: "Misaligned clocks introduce systematic errors" }),
 
-// ── 6. Verify — see counts by kg tag ───────────────────────────────────────
-MATCH (n)
-WHERE n.kg IS NOT NULL
-RETURN n.kg AS graph, count(n) AS total_nodes
-ORDER BY graph;
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPUTATION TECHNIQUE NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(tFFill:Technique        { kg: "timeseries", stage: "Imputation", name: "Forward Fill (Last Observation Carried Forward)", python_function: "df.ffill()",                  use_case: "Sensor data where last measurement persists",        limitation: "Introduces lag bias" }),
+(tBFill:Technique        { kg: "timeseries", stage: "Imputation", name: "Backward Fill",                                   python_function: "df.bfill()",                  use_case: "When future value is known reference",               limitation: "Constitutes data leakage in causal forecasting" }),
+(tLinInterp:Technique    { kg: "timeseries", stage: "Imputation", name: "Linear Interpolation",                            python_function: "df.interpolate('linear')",   use_case: "Short gaps in smooth continuous signals",            limitation: "Assumes linearity between known points" }),
+(tSpline:Technique       { kg: "timeseries", stage: "Imputation", name: "Spline Interpolation",                            python_function: "df.interpolate('spline')",   use_case: "Longer gaps in smooth nonlinear signals",            limitation: "Risk of Runge phenomenon at gap edges" }),
+(tKalman:Technique       { kg: "timeseries", stage: "Imputation", name: "Kalman Filter Imputation",                        python_function: "KalmanFilter().em(X).smooth(X)", use_case: "Noisy sensor streams",                             limitation: "Requires model parameterisation" }),
+(tMICE:Technique         { kg: "timeseries", stage: "Imputation", name: "MICE (Multiple Imputation by Chained Equations)", python_function: "IterativeImputer()",          use_case: "When missingness depends on other variables (MAR)",  limitation: "Ignores temporal structure" }),
+(tSeasonImp:Technique    { kg: "timeseries", stage: "Imputation", name: "Seasonal Mean Imputation",                        python_function: "mean of same season across years", use_case: "Replace missing with mean of same season",         limitation: "Assumes stable seasonality" }),
+(tGANImp:Technique       { kg: "timeseries", stage: "Imputation", name: "GAN-Based Imputation (GAIN / GRUI)",              python_function: "GAIN or tsai library",        use_case: "Long gaps in complex multivariate time series",      limitation: "Training instability; requires large datasets" }),
 
-// Expected output:
-//   fods       | 86
-//   timeseries | ~400+
+// ─────────────────────────────────────────────────────────────────────────────
+// SAMPLING & WINDOWING TECHNIQUE NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(tSliding:Technique      { kg: "timeseries", stage: "Sampling", name: "Sliding Window",                           python_function: "np.lib.stride_tricks.sliding_window_view()", use_case: "Convert time series to supervised (X,y) pairs",  limitation: "Adjacent windows are highly correlated" }),
+(tTumbling:Technique     { kg: "timeseries", stage: "Sampling", name: "Tumbling (Non-Overlapping) Window",        python_function: "df.groupby(df.index // W)",                  use_case: "Independent windows for classification",         limitation: "Smaller effective dataset size" }),
+(tExpandCV:Technique     { kg: "timeseries", stage: "Sampling", name: "Expanding Window (Walk-Forward) CV",       python_function: "TimeSeriesSplit(n_splits=5)",                 use_case: "Temporal cross-validation respecting time order", limitation: "Early folds have very few training samples" }),
+(tSlidingCV:Technique    { kg: "timeseries", stage: "Sampling", name: "Sliding Window Cross-Validation",          python_function: "TimeSeriesSplit(max_train_size=N)",           use_case: "Rolling CV with fixed training size",            limitation: "More expensive than single train/test split" }),
+(tStratTemp:Technique    { kg: "timeseries", stage: "Sampling", name: "Stratified Temporal Split",                python_function: "Custom sort-by-time then sample strata",     use_case: "Maintain class balance while preserving order",  limitation: "Difficult when rare events are clustered in time" }),
+(tDownsamp:Technique     { kg: "timeseries", stage: "Sampling", name: "Temporal Downsampling",                    python_function: "df.resample('10min').mean()",                use_case: "Reduce data volume or match target frequency",    limitation: "Aliasing risk if Nyquist criterion not met" }),
+(tUpsamp:Technique       { kg: "timeseries", stage: "Sampling", name: "Temporal Upsampling",                      python_function: "df.resample('1min').interpolate()",          use_case: "Align low-frequency series with high-frequency target", limitation: "Creates synthetic values" }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUGMENTATION TECHNIQUE NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(tJitter:Technique       { kg: "timeseries", stage: "Augmentation", name: "Jittering (Gaussian Noise Addition)",       python_function: "series + np.random.normal(0, sigma, len(series))", use_case: "Increase robustness by simulating sensor noise", limitation: "Excessive noise destroys signal" }),
+(tMagScale:Technique     { kg: "timeseries", stage: "Augmentation", name: "Magnitude Scaling",                         python_function: "series * np.random.uniform(0.8, 1.2)",              use_case: "Simulate amplitude variation",                   limitation: "Does not change temporal pattern" }),
+(tTimeWarp:Technique     { kg: "timeseries", stage: "Augmentation", name: "Time Warping",                              python_function: "tsaug: TimeWarp().augment(X)",                      use_case: "Simulate speed variation in repeated activities", limitation: "Label alignment required" }),
+(tWinSlice:Technique     { kg: "timeseries", stage: "Augmentation", name: "Window Slicing",                            python_function: "tsaug: Crop(size=0.8).augment(X)",                  use_case: "Extract multiple sub-sequences from one sample", limitation: "Short slices may lose critical patterns" }),
+(tDTWBary:Technique      { kg: "timeseries", stage: "Augmentation", name: "DTW Barycentric Averaging",                 python_function: "dtaidistance: dtw_barycenter_averaging()",          use_case: "Generate synthetic samples as DTW average",      limitation: "Computationally expensive" }),
+(tGANAug:Technique       { kg: "timeseries", stage: "Augmentation", name: "GAN-Based Augmentation (TimeGAN / TGAN)",   python_function: "ydata-synthetic: TimeGAN",                          use_case: "Generate synthetic realistic time series",       limitation: "Requires large real dataset; mode collapse risk" }),
+(tFreqAug:Technique      { kg: "timeseries", stage: "Augmentation", name: "Frequency Domain Augmentation",             python_function: "np.fft.fft(series); perturb; np.fft.ifft()",        use_case: "Perturb FFT magnitude/phase for diverse samples", limitation: "Inverse FFT may produce unrealistic transients" }),
+(tMixup:Technique        { kg: "timeseries", stage: "Augmentation", name: "Time Series Mixup",                         python_function: "lambda*x1 + (1-lambda)*x2",                         use_case: "Linear interpolation between two training samples", limitation: "Ambiguous label interpolation for classification" }),
+(tSMOTETS:Technique      { kg: "timeseries", stage: "Augmentation", name: "SMOTE for Time Series",                     python_function: "SMOTE() from imblearn on flattened features",        use_case: "Oversample minority class windows",              limitation: "Ignores temporal structure within each window" }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FEATURE ENGINEERING TECHNIQUE NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(tLagFeat:Technique      { kg: "timeseries", stage: "Feature Engineering", name: "Lag Features",                              python_function: "df['lag1'] = df['value'].shift(1)",  use_case: "Provide model with explicit past values",        limitation: "High multicollinearity between adjacent lags" }),
+(tRollingFeat:Technique  { kg: "timeseries", stage: "Feature Engineering", name: "Rolling Statistical Features",              python_function: "df.rolling(W).agg(['mean','std'])", use_case: "Capture local temporal statistics",              limitation: "Window boundary choice is arbitrary" }),
+(tEWMFeat:Technique      { kg: "timeseries", stage: "Feature Engineering", name: "EWM Features",                              python_function: "df.ewm(span=12).mean()",                use_case: "Exponentially-weighted statistics",               limitation: "Multiple span values increase feature count" }),
+(tFFTFeat:Technique      { kg: "timeseries", stage: "Feature Engineering", name: "FFT / Spectral Features",                   python_function: "np.fft.fft(window)",                    use_case: "Frequency-domain energy and dominant frequency",  limitation: "Non-stationary signals need STFT" }),
+(tWavelet:Technique      { kg: "timeseries", stage: "Feature Engineering", name: "Wavelet Transform Features",                python_function: "pywt.wavedec(signal, 'db4', level=4)", use_case: "Time-frequency features for transients",         limitation: "Choice of wavelet family requires domain knowledge" }),
+(tCalendar:Technique     { kg: "timeseries", stage: "Feature Engineering", name: "Calendar / Temporal Features",              python_function: "np.sin(2*np.pi*df.index.hour/24)",     use_case: "Encode hour, day, month, holidays",              limitation: "Cyclical features need sin/cos encoding" }),
+(tTsfresh:Technique      { kg: "timeseries", stage: "Feature Engineering", name: "tsfresh Automated Feature Extraction",      python_function: "tsfresh.extract_features(df)",         use_case: "Automatically extract 700+ statistical features", limitation: "Computationally expensive; produces correlated features" }),
+(tCumFeat:Technique      { kg: "timeseries", stage: "Feature Engineering", name: "Cumulative / Integrated Features",          python_function: "df.groupby('engine_id').cumcount()",  use_case: "Cumulative sum since last event; RUL tracking",  limitation: "Can create non-stationarity" }),
+(tTargetEnc:Technique    { kg: "timeseries", stage: "Feature Engineering", name: "Target Encoding of Categorical Covariates", python_function: "category_encoders.TargetEncoder()",    use_case: "Encode high-cardinality categoricals",           limitation: "Data leakage if not computed within CV fold" }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODEL NODES — STATISTICAL
+// ─────────────────────────────────────────────────────────────────────────────
+(mAR:Model          { kg: "timeseries", family: "Statistical",       name: "AR (Autoregressive)",              python_class: "AutoReg(series, lags=p)",                               strengths: "Simple; interpretable; fast",                               weaknesses: "Linear only; assumes stationarity; no exogenous inputs" }),
+(mMA:Model          { kg: "timeseries", family: "Statistical",       name: "MA (Moving Average)",              python_class: "ARMA(series, order=(0,q))",                             strengths: "Captures short-memory processes; invertible",               weaknesses: "Cannot model long-memory; standalone rarely used" }),
+(mARIMA:Model       { kg: "timeseries", family: "Statistical",       name: "ARIMA",                           python_class: "ARIMA(series, order=(p,d,q))",                          strengths: "Well-understood; auto_arima for order selection",           weaknesses: "Assumes linearity; no seasonality without extension" }),
+(mSARIMA:Model      { kg: "timeseries", family: "Statistical",       name: "SARIMA",                          python_class: "SARIMAX(series, order=(p,d,q), seasonal_order=(P,D,Q,m))", strengths: "Explicitly models seasonality",                         weaknesses: "Many hyperparameters; slow grid search; single seasonality" }),
+(mARIMAX:Model      { kg: "timeseries", family: "Statistical",       name: "ARIMAX / SARIMAX",                python_class: "SARIMAX(endog, exog=X)",                                strengths: "Incorporates external predictors; flexible",               weaknesses: "Exogenous variables must be known at forecast horizon" }),
+(mETS:Model         { kg: "timeseries", family: "Statistical",       name: "Exponential Smoothing (ETS)",     python_class: "ExponentialSmoothing(series, trend='add', seasonal='add')", strengths: "Robust; fast; handles level/trend/seasonality",       weaknesses: "No external regressors" }),
+(mVAR:Model         { kg: "timeseries", family: "Statistical",       name: "VAR (Vector Autoregression)",     python_class: "VAR(df).fit(maxlags=p)",                                strengths: "Captures cross-variable dependencies; Granger causality",  weaknesses: "Parameters grow as k squared x p; assumes stationarity" }),
+(mProphet:Model     { kg: "timeseries", family: "Statistical",       name: "Prophet",                         python_class: "Prophet()",                                             strengths: "Handles missing data and holidays; minimal tuning",         weaknesses: "Not for irregular data; can overfit seasonality" }),
+(mTheta:Model       { kg: "timeseries", family: "Statistical",       name: "Theta Method",                    python_class: "ThetaModel(series)",                                    strengths: "Strong empirical performance; simple",                      weaknesses: "Additive seasonality assumption" }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODEL NODES — MACHINE LEARNING
+// ─────────────────────────────────────────────────────────────────────────────
+(mXGB:Model         { kg: "timeseries", family: "Gradient Boosting", name: "XGBoost",                         python_class: "XGBRegressor() / XGBClassifier()",                     strengths: "Handles non-linearity; fast; built-in feature importance", weaknesses: "No native temporal structure awareness" }),
+(mLGBM:Model        { kg: "timeseries", family: "Gradient Boosting", name: "LightGBM",                        python_class: "LGBMRegressor() / LGBMClassifier()",                   strengths: "Very fast; low memory; categorical feature support",        weaknesses: "No temporal awareness without feature engineering" }),
+(mRF:Model          { kg: "timeseries", family: "Tree Ensemble",     name: "Random Forest",                   python_class: "RandomForestRegressor() / RandomForestClassifier()",   strengths: "Low hyperparameter sensitivity; resistant to outliers",     weaknesses: "Cannot extrapolate beyond training range" }),
+(mSVR:Model         { kg: "timeseries", family: "Kernel Method",     name: "Support Vector Regression / SVC", python_class: "SVR() / SVC()",                                        strengths: "Effective in high-dimensional spaces",                      weaknesses: "Does not scale to large datasets" }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODEL NODES — DEEP LEARNING
+// ─────────────────────────────────────────────────────────────────────────────
+(mRNN:Model         { kg: "timeseries", family: "Deep Learning",     name: "RNN (Vanilla Recurrent Neural Network)",                                   python_class: "torch.nn.RNN()",             strengths: "Sequence-native; variable length input",                   weaknesses: "Vanishing gradient; superseded by LSTM/GRU" }),
+(mLSTM:Model        { kg: "timeseries", family: "Deep Learning",     name: "LSTM (Long Short-Term Memory)",                                            python_class: "torch.nn.LSTM()",            strengths: "Strong sequential memory; long-range dependency learning", weaknesses: "Slow to train; sequential computation limits GPU parallelism" }),
+(mGRU:Model         { kg: "timeseries", family: "Deep Learning",     name: "GRU (Gated Recurrent Unit)",                                               python_class: "torch.nn.GRU()",             strengths: "Faster than LSTM; fewer parameters; often matches LSTM",   weaknesses: "Same sequential computation bottleneck as LSTM" }),
+(mCNN1D:Model       { kg: "timeseries", family: "Deep Learning",     name: "1D-CNN (Temporal Convolutional Network)",                                  python_class: "torch.nn.Conv1d()",          strengths: "Highly parallelisable; fast training",                     weaknesses: "Receptive field limited by kernel size/depth" }),
+(mTCN:Model         { kg: "timeseries", family: "Deep Learning",     name: "TCN (Temporal Convolutional Network with Dilated Causal Convolutions)",    python_class: "pytorch-forecasting TCN",    strengths: "Parallelisable; long receptive field; causal padding",     weaknesses: "Fixed receptive field; less memory-efficient for very long sequences" }),
+(mTransformer:Model { kg: "timeseries", family: "Deep Learning",     name: "Transformer (Self-Attention)",                                             python_class: "torch.nn.Transformer",       strengths: "Parallelisable; captures long-range dependencies",         weaknesses: "O(n2) attention complexity; data-hungry" }),
+(mInformer:Model    { kg: "timeseries", family: "Deep Learning",     name: "Informer / Autoformer / PatchTST",                                         python_class: "neuralforecast: PatchTST",   strengths: "Handle very long input sequences; strong benchmarks",      weaknesses: "Complex; heavy compute" }),
+(mNBEATS:Model      { kg: "timeseries", family: "Deep Learning",     name: "N-BEATS",                                                                  python_class: "neuralforecast: NBEATS",     strengths: "No exogenous inputs needed; interpretable variant",        weaknesses: "Long training time; requires large datasets" }),
+(mTFT:Model         { kg: "timeseries", family: "Deep Learning",     name: "Temporal Fusion Transformer (TFT)",                                        python_class: "pytorch-forecasting TFT",    strengths: "Handles static/known-future/unknown covariates; quantile output", weaknesses: "Complex; slow; requires structured dataset" }),
+(mDeepAR:Model      { kg: "timeseries", family: "Deep Learning",     name: "DeepAR",                                                                   python_class: "gluonts: DeepAREstimator",   strengths: "Global model; handles thousands of related series",        weaknesses: "Slow; requires many series for global training" }),
+(mTimesNet:Model    { kg: "timeseries", family: "Deep Learning",     name: "TimesNet",                                                                  python_class: "TSlib TimesNet",             strengths: "State-of-the-art 2023 benchmarks; efficient",              weaknesses: "Newer; less ecosystem support" }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODEL NODES — ANOMALY DETECTION
+// ─────────────────────────────────────────────────────────────────────────────
+(mIsoForest:Model   { kg: "timeseries", family: "Anomaly Detection", name: "Isolation Forest",                                          python_class: "IsolationForest()",          strengths: "No anomaly labels needed; scales well",                    weaknesses: "Does not exploit temporal structure" }),
+(mLOF:Model         { kg: "timeseries", family: "Anomaly Detection", name: "Local Outlier Factor",                                      python_class: "LocalOutlierFactor()",       strengths: "Detects local anomalies; no distribution assumption",       weaknesses: "Not efficient on large datasets" }),
+(mAE:Model          { kg: "timeseries", family: "Anomaly Detection", name: "Autoencoder / LSTM-AE for Anomaly Detection",               python_class: "Custom PyTorch/Keras LSTM AE", strengths: "Unsupervised; captures complex patterns",                 weaknesses: "Threshold selection is heuristic" }),
+(mSR:Model          { kg: "timeseries", family: "Anomaly Detection", name: "Spectral Residual (SR) + CNN",                              python_class: "adtk or merlion library",    strengths: "Unsupervised; fast; interpretable saliency map",            weaknesses: "Point anomaly focused" }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PREDICTION TYPE NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(ptForecast:PredictionType    { kg: "timeseries", name: "Time Series Forecasting",              description: "Predicting future values of a continuous target variable",              split_strategy: "Temporal train/test split — never random shuffle" }),
+(ptClassify:PredictionType    { kg: "timeseries", name: "Time Series Classification",           description: "Assigning a class label to an entire time series window or sequence",   split_strategy: "Stratified temporal split or subject-wise split" }),
+(ptAnomaly:PredictionType     { kg: "timeseries", name: "Anomaly Detection",                    description: "Identifying unusual observations or patterns deviating from normal",     split_strategy: "Train on normal-only data; test on mixed" }),
+(ptRUL:PredictionType         { kg: "timeseries", name: "Remaining Useful Life (RUL) Prediction", description: "Regression predicting time remaining before failure",               split_strategy: "Engine/unit-wise split — not temporal" }),
+(ptChangePoint:PredictionType { kg: "timeseries", name: "Change Point Detection",               description: "Locating time points where statistical properties change",               split_strategy: "Offline (batch) or online (sequential) mode" }),
+(ptEvent:PredictionType       { kg: "timeseries", name: "Event Detection / Trigger Classification", description: "Detecting the onset time of a specific event within a stream",    split_strategy: "Temporal or subject-wise split" }),
+(ptPHM:PredictionType         { kg: "timeseries", name: "Prognostics & Health Management (PHM)", description: "Combining anomaly detection, fault classification, and RUL",           split_strategy: "Unit-wise split (each machine is a unit)" }),
+(ptImpute:PredictionType      { kg: "timeseries", name: "Time Series Imputation",               description: "Reconstructing missing values within a historical time series",         split_strategy: "Mask known values for evaluation (MCAR holdout)" }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EVALUATION METRIC NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(emMAE:EvalMetric    { kg: "timeseries", name: "MAE",    formula: "mean(|y - y_hat|)",                               suitable_for: "Forecasting, RUL",                    interpretation: "Average absolute error in original units; robust to outliers" }),
+(emRMSE:EvalMetric   { kg: "timeseries", name: "RMSE",   formula: "sqrt(mean((y - y_hat)^2))",                       suitable_for: "Forecasting, RUL",                    interpretation: "Penalises large errors more; in original units" }),
+(emMAPE:EvalMetric   { kg: "timeseries", name: "MAPE",   formula: "mean(|y - y_hat| / |y|) x 100",                  suitable_for: "Forecasting",                         interpretation: "Scale-independent; easy to communicate as %" }),
+(emMASE:EvalMetric   { kg: "timeseries", name: "MASE",   formula: "MAE / MAE_naive_seasonal",                        suitable_for: "Forecasting",                         interpretation: "Scale-free; MASE < 1 means better than seasonal naive" }),
+(emF1:EvalMetric     { kg: "timeseries", name: "F1",     formula: "2*(P*R)/(P+R)",                                   suitable_for: "Classification, Anomaly Detection",   interpretation: "Harmonic mean of precision and recall" }),
+(emAUROC:EvalMetric  { kg: "timeseries", name: "AUROC",  formula: "Area under TPR vs FPR curve",                     suitable_for: "Classification, Anomaly Detection",   interpretation: "Threshold-independent; probability model ranks positive above negative" }),
+(emAUPRC:EvalMetric  { kg: "timeseries", name: "AUPRC",  formula: "Area under Precision vs Recall curve",            suitable_for: "Anomaly Detection, Imbalanced classification", interpretation: "More informative than AUROC on imbalanced datasets" }),
+(emCRPS:EvalMetric   { kg: "timeseries", name: "CRPS",   formula: "Proper scoring rule for full predictive distribution", suitable_for: "Probabilistic Forecasting",       interpretation: "Evaluates full predictive distribution; lower is better" }),
+(emRULScore:EvalMetric { kg: "timeseries", name: "NASA RUL Score", formula: "Asymmetric penalty: late predictions penalised more", suitable_for: "RUL Prediction",        interpretation: "Conservative is safer — penalises late more than early" }),
+(emMCC:EvalMetric    { kg: "timeseries", name: "MCC",    formula: "(TP*TN - FP*FN)/sqrt((TP+FP)(TP+FN)(TN+FP)(TN+FN))", suitable_for: "Classification, Anomaly Detection", interpretation: "Balanced even with severe class imbalance; range [-1,1]" }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USE CASE NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(ucPredMaint:UseCase     { kg: "timeseries", name: "Predictive Maintenance",      domain: "Industrial/IoT",    benchmark_dataset: "CMAPSS / PRONOSTIA",   description: "Detect faults early and estimate RUL to prevent unplanned downtime" }),
+(ucEnergy:UseCase        { kg: "timeseries", name: "Energy Demand Forecasting",   domain: "Energy/Utilities",  benchmark_dataset: "ETT / GEFCom",          description: "Forecast power load, consumption, or generation at various horizons" }),
+(ucFinancial:UseCase     { kg: "timeseries", name: "Financial Time Series",       domain: "Finance",           benchmark_dataset: "M4 Competition",        description: "Price prediction, volatility forecasting, and regime detection" }),
+(ucIoT:UseCase           { kg: "timeseries", name: "IoT Sensor Monitoring",       domain: "IoT/Manufacturing", benchmark_dataset: "SKAB / MIT-BIH",        description: "Continuous sensor stream monitoring, anomaly flagging, imputation" }),
+(ucHealthcare:UseCase    { kg: "timeseries", name: "Healthcare / Clinical TS",    domain: "Healthcare",        benchmark_dataset: "PhysioNet / MIMIC-III", description: "ICU vital sign monitoring, sepsis prediction, ECG classification" }),
+(ucSales:UseCase         { kg: "timeseries", name: "Retail Sales Forecasting",    domain: "Retail",            benchmark_dataset: "M5 Competition",        description: "SKU-level demand forecasting accounting for promotions and seasonality" }),
+(ucWeather:UseCase       { kg: "timeseries", name: "Weather / Climate Forecasting", domain: "Meteorology",    benchmark_dataset: "Weather dataset / ERA5", description: "Short-term and seasonal weather forecasting" }),
+(ucNetworkAD:UseCase     { kg: "timeseries", name: "Network Anomaly Detection",   domain: "Cybersecurity",     benchmark_dataset: "KDD Cup 1999 / CICIDS",  description: "Detect intrusions or unusual traffic patterns in network flow data" }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BEST PRACTICE NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(bpSplit:BestPractice      { kg: "timeseries", name: "Always Use Temporal Train/Test Split",           type: "DO",   description: "Train data must chronologically precede test data. Never use random shuffle." }),
+(bpFitTrain:BestPractice   { kg: "timeseries", name: "Fit Scalers/Encoders Only on Training Data",    type: "DO",   description: "All preprocessing transformers must be fit on training fold only." }),
+(bpBaseline:BestPractice   { kg: "timeseries", name: "Establish a Naive Baseline First",              type: "DO",   description: "Compute naive seasonal and persistence baselines before any ML." }),
+(bpResidual:BestPractice   { kg: "timeseries", name: "Perform Residual Diagnostics",                  type: "DO",   description: "After fitting: check residual ACF, histogram, and residuals vs time." }),
+(bpUncertain:BestPractice  { kg: "timeseries", name: "Report Prediction Intervals Not Just Points",   type: "DO",   description: "Communicate uncertainty via confidence intervals or quantile forecasts." }),
+(bpTSCV:BestPractice       { kg: "timeseries", name: "Use Time Series Cross-Validation",              type: "DO",   description: "Walk-forward or sliding-window CV gives honest production performance estimate." }),
+(bpMonitor:BestPractice    { kg: "timeseries", name: "Monitor for Data and Concept Drift",            type: "DO",   description: "Track input and prediction distributions over time. Retrain when drift detected." }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ANTI-PATTERN NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(apRandSplit:AntiPattern   { kg: "timeseries", name: "Random Train/Test Split on Time Series",        type: "DONT", description: "Shuffling ignores temporal dependency and causes data leakage.",           correct_approach: "Always split by time: train on past, test on future" }),
+(apFitAll:AntiPattern      { kg: "timeseries", name: "Fit Scaler on Full Dataset Before Split",       type: "DONT", description: "Scaling using test statistics leaks test information into the model.",     correct_approach: "Split first; fit scaler on train only; transform train+test" }),
+(apNoStation:AntiPattern   { kg: "timeseries", name: "Running ARIMA on Non-Stationary Series",        type: "DONT", description: "ARIMA on a unit-root series produces spurious correlations.",               correct_approach: "Test with ADF/KPSS; difference until stationary" }),
+(apSMOTEFirst:AntiPattern  { kg: "timeseries", name: "Applying SMOTE Before Train/Test Split",        type: "DONT", description: "Synthetic samples from both train and test contaminate evaluation.",       correct_approach: "Apply SMOTE only on training fold after splitting" }),
+(apLookAhead:AntiPattern   { kg: "timeseries", name: "Look-Ahead Bias in Window Features",            type: "DONT", description: "Centred rolling windows use future values from within the window.",        correct_approach: "Use trailing-only (right-aligned) windows" }),
+(apOneMetric:AntiPattern   { kg: "timeseries", name: "Evaluating Only on Accuracy or RMSE",           type: "DONT", description: "Single metric misses important aspects; accuracy ignores imbalance.",     correct_approach: "Report multiple complementary metrics appropriate to the task" }),
+(apNoBaseline:AntiPattern  { kg: "timeseries", name: "Skipping the Naive Baseline",                   type: "DONT", description: "Without a baseline it is impossible to gauge value-add of complex model.", correct_approach: "Always compute seasonal naive and persistence baselines" }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LIBRARY NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(libPandas:Library     { kg: "timeseries", name: "pandas",          use: "Data loading, time indexing, resampling, rolling ops",     install: "pip install pandas" }),
+(libNumpy:Library      { kg: "timeseries", name: "numpy",           use: "Array ops, FFT, windowing",                                install: "pip install numpy" }),
+(libStatsm:Library     { kg: "timeseries", name: "statsmodels",     use: "ARIMA, SARIMA, ETS, ACF/PACF, ADF/KPSS, VAR",             install: "pip install statsmodels" }),
+(libSklearn:Library    { kg: "timeseries", name: "scikit-learn",    use: "Scalers, RF, SVM, IsolationForest, TimeSeriesSplit",       install: "pip install scikit-learn" }),
+(libPytorch:Library    { kg: "timeseries", name: "PyTorch",         use: "LSTM, GRU, CNN, Transformer implementation",               install: "pip install torch" }),
+(libTF:Library         { kg: "timeseries", name: "TensorFlow",      use: "LSTM, GRU, CNN, high-level model building",                install: "pip install tensorflow" }),
+(libXGB:Library        { kg: "timeseries", name: "XGBoost",         use: "Gradient boosted trees for tabular TS",                    install: "pip install xgboost" }),
+(libLGBM:Library       { kg: "timeseries", name: "LightGBM",        use: "Fast gradient boosted trees",                             install: "pip install lightgbm" }),
+(libNixtla:Library     { kg: "timeseries", name: "neuralforecast",  use: "NBEATS, TFT, PatchTST, Autoformer",                       install: "pip install neuralforecast" }),
+(libGluon:Library      { kg: "timeseries", name: "gluonts",         use: "DeepAR, WaveNet; probabilistic forecasting",               install: "pip install gluonts" }),
+(libProphet:Library    { kg: "timeseries", name: "prophet",         use: "Prophet forecasting with holidays",                        install: "pip install prophet" }),
+(libPykalman:Library   { kg: "timeseries", name: "pykalman",        use: "Kalman filter/smoother imputation",                        install: "pip install pykalman" }),
+(libTsaug:Library      { kg: "timeseries", name: "tsaug",           use: "Time series augmentation: jitter, warp, crop, drift",      install: "pip install tsaug" }),
+(libTsfresh:Library    { kg: "timeseries", name: "tsfresh",         use: "Automated time series feature extraction (700+ features)", install: "pip install tsfresh" }),
+(libPywt:Library       { kg: "timeseries", name: "PyWavelets",      use: "Wavelet transform for time-frequency features",            install: "pip install PyWavelets" }),
+(libRuptures:Library   { kg: "timeseries", name: "ruptures",        use: "Change point detection (PELT, BINSEG, Window)",            install: "pip install ruptures" }),
+(libScipy:Library      { kg: "timeseries", name: "scipy",           use: "Signal processing: FFT, filters, interpolation, stats",    install: "pip install scipy" }),
+(libMissingno:Library  { kg: "timeseries", name: "missingno",       use: "Missing value pattern visualisation",                      install: "pip install missingno" }),
+(libOptuna:Library     { kg: "timeseries", name: "optuna",          use: "Hyperparameter optimisation (Bayesian)",                   install: "pip install optuna" }),
+(libMlflow:Library     { kg: "timeseries", name: "MLflow",          use: "Experiment tracking, model registry, deployment",          install: "pip install mlflow" }),
+(libEvidently:Library  { kg: "timeseries", name: "Evidently AI",    use: "Data / prediction drift monitoring",                       install: "pip install evidently" }),
+(libImbalanced:Library { kg: "timeseries", name: "imbalanced-learn", use: "SMOTE, ADASYN, RandomUnderSampler for class imbalance",  install: "pip install imbalanced-learn" }),
+(libDtaidist:Library   { kg: "timeseries", name: "dtaidistance",    use: "DTW distance, barycenter averaging",                       install: "pip install dtaidistance" }),
+(libMerlion:Library    { kg: "timeseries", name: "merlion",         use: "Anomaly detection and forecasting suite",                  install: "pip install salesforce-merlion" }),
+(libAdtk:Library       { kg: "timeseries", name: "adtk",            use: "Rule-based and statistical anomaly detection",             install: "pip install adtk" }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEARNING PATH NODES
+// ─────────────────────────────────────────────────────────────────────────────
+(lpForecasting:LearningPath { kg: "timeseries", name: "Forecasting Fundamentals Path",        goal: "Go from zero to building a production-ready univariate forecasting model",           estimated_steps: 14 }),
+(lpAnomaly:LearningPath     { kg: "timeseries", name: "Anomaly Detection Path",               goal: "Detect point, contextual, and collective anomalies in sensor and operational TS",   estimated_steps: 13 }),
+(lpDL:LearningPath          { kg: "timeseries", name: "Deep Learning for Time Series Path",   goal: "Build and tune LSTM, TCN, and Transformer models for forecasting and classification", estimated_steps: 15 }),
+(lpRUL:LearningPath         { kg: "timeseries", name: "Predictive Maintenance & RUL Path",    goal: "End-to-end pipeline for industrial degradation modelling and RUL prediction",        estimated_steps: 12 }),
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RELATIONSHIPS — all in same CREATE block, no MATCH needed
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Pipeline flow
+(stageIngest)-[:LEADS_TO {order:1}]->(stageEDA),
+(stageEDA)-[:LEADS_TO {order:2}]->(stagePreprocess),
+(stagePreprocess)-[:LEADS_TO {order:3}]->(stageSampling),
+(stageSampling)-[:LEADS_TO {order:4}]->(stageAugment),
+(stageAugment)-[:LEADS_TO {order:5}]->(stageFeature),
+(stageFeature)-[:LEADS_TO {order:6}]->(stageModel),
+(stageModel)-[:LEADS_TO {order:7}]->(stageEval),
+(stageEval)-[:LEADS_TO {order:8}]->(stageDeploy),
+
+// Stage USES EDA Techniques
+(stageEDA)-[:USES]->(tTimeplot),
+(stageEDA)-[:USES]->(tACF),
+(stageEDA)-[:USES]->(tPACF),
+(stageEDA)-[:USES]->(tADF),
+(stageEDA)-[:USES]->(tKPSS),
+(stageEDA)-[:USES]->(tSeasonDecomp),
+(stageEDA)-[:USES]->(tSTL),
+(stageEDA)-[:USES]->(tRollingStats),
+(stageEDA)-[:USES]->(tLagPlot),
+(stageEDA)-[:USES]->(tIQR),
+(stageEDA)-[:USES]->(tZScore),
+(stageEDA)-[:USES]->(tMissingPat),
+(stageEDA)-[:USES]->(tHistogram),
+(stageEDA)-[:USES]->(tCrossCorr),
+(stageEDA)-[:USES]->(tGranger),
+(stageEDA)-[:USES]->(tCPDetect),
+
+// Stage USES Preprocessing Techniques
+(stagePreprocess)-[:USES]->(tResample),
+(stagePreprocess)-[:USES]->(tDiff),
+(stagePreprocess)-[:USES]->(tLog),
+(stagePreprocess)-[:USES]->(tBoxCox),
+(stagePreprocess)-[:USES]->(tMinMax),
+(stagePreprocess)-[:USES]->(tZStd),
+(stagePreprocess)-[:USES]->(tRobust),
+(stagePreprocess)-[:USES]->(tSmoothMA),
+(stagePreprocess)-[:USES]->(tEWMA),
+(stagePreprocess)-[:USES]->(tSavitzky),
+(stagePreprocess)-[:USES]->(tClip),
+(stagePreprocess)-[:USES]->(tDetrend),
+(stagePreprocess)-[:USES]->(tDeseason),
+(stagePreprocess)-[:USES]->(tTimeAlign),
+(stagePreprocess)-[:USES]->(tFFill),
+(stagePreprocess)-[:USES]->(tBFill),
+(stagePreprocess)-[:USES]->(tLinInterp),
+(stagePreprocess)-[:USES]->(tSpline),
+(stagePreprocess)-[:USES]->(tKalman),
+(stagePreprocess)-[:USES]->(tMICE),
+(stagePreprocess)-[:USES]->(tSeasonImp),
+(stagePreprocess)-[:USES]->(tGANImp),
+
+// Stage USES Sampling Techniques
+(stageSampling)-[:USES]->(tSliding),
+(stageSampling)-[:USES]->(tTumbling),
+(stageSampling)-[:USES]->(tExpandCV),
+(stageSampling)-[:USES]->(tSlidingCV),
+(stageSampling)-[:USES]->(tStratTemp),
+(stageSampling)-[:USES]->(tDownsamp),
+(stageSampling)-[:USES]->(tUpsamp),
+
+// Stage USES Augmentation Techniques
+(stageAugment)-[:USES]->(tJitter),
+(stageAugment)-[:USES]->(tMagScale),
+(stageAugment)-[:USES]->(tTimeWarp),
+(stageAugment)-[:USES]->(tWinSlice),
+(stageAugment)-[:USES]->(tDTWBary),
+(stageAugment)-[:USES]->(tGANAug),
+(stageAugment)-[:USES]->(tFreqAug),
+(stageAugment)-[:USES]->(tMixup),
+(stageAugment)-[:USES]->(tSMOTETS),
+
+// Stage USES Feature Engineering Techniques
+(stageFeature)-[:USES]->(tLagFeat),
+(stageFeature)-[:USES]->(tRollingFeat),
+(stageFeature)-[:USES]->(tEWMFeat),
+(stageFeature)-[:USES]->(tFFTFeat),
+(stageFeature)-[:USES]->(tWavelet),
+(stageFeature)-[:USES]->(tCalendar),
+(stageFeature)-[:USES]->(tTsfresh),
+(stageFeature)-[:USES]->(tCumFeat),
+(stageFeature)-[:USES]->(tTargetEnc),
+
+// Stage USES Models
+(stageModel)-[:USES]->(mAR),
+(stageModel)-[:USES]->(mMA),
+(stageModel)-[:USES]->(mARIMA),
+(stageModel)-[:USES]->(mSARIMA),
+(stageModel)-[:USES]->(mARIMAX),
+(stageModel)-[:USES]->(mETS),
+(stageModel)-[:USES]->(mVAR),
+(stageModel)-[:USES]->(mProphet),
+(stageModel)-[:USES]->(mTheta),
+(stageModel)-[:USES]->(mXGB),
+(stageModel)-[:USES]->(mLGBM),
+(stageModel)-[:USES]->(mRF),
+(stageModel)-[:USES]->(mSVR),
+(stageModel)-[:USES]->(mRNN),
+(stageModel)-[:USES]->(mLSTM),
+(stageModel)-[:USES]->(mGRU),
+(stageModel)-[:USES]->(mCNN1D),
+(stageModel)-[:USES]->(mTCN),
+(stageModel)-[:USES]->(mTransformer),
+(stageModel)-[:USES]->(mInformer),
+(stageModel)-[:USES]->(mNBEATS),
+(stageModel)-[:USES]->(mTFT),
+(stageModel)-[:USES]->(mDeepAR),
+(stageModel)-[:USES]->(mTimesNet),
+(stageModel)-[:USES]->(mIsoForest),
+(stageModel)-[:USES]->(mLOF),
+(stageModel)-[:USES]->(mAE),
+(stageModel)-[:USES]->(mSR),
+
+// Model SUITABLE_FOR PredictionType
+(mARIMA)-[:SUITABLE_FOR]->(ptForecast),
+(mSARIMA)-[:SUITABLE_FOR]->(ptForecast),
+(mARIMAX)-[:SUITABLE_FOR]->(ptForecast),
+(mETS)-[:SUITABLE_FOR]->(ptForecast),
+(mProphet)-[:SUITABLE_FOR]->(ptForecast),
+(mTheta)-[:SUITABLE_FOR]->(ptForecast),
+(mVAR)-[:SUITABLE_FOR]->(ptForecast),
+(mNBEATS)-[:SUITABLE_FOR]->(ptForecast),
+(mDeepAR)-[:SUITABLE_FOR]->(ptForecast),
+(mTFT)-[:SUITABLE_FOR]->(ptForecast),
+(mInformer)-[:SUITABLE_FOR]->(ptForecast),
+(mTimesNet)-[:SUITABLE_FOR]->(ptForecast),
+(mLSTM)-[:SUITABLE_FOR]->(ptForecast),
+(mGRU)-[:SUITABLE_FOR]->(ptForecast),
+(mTCN)-[:SUITABLE_FOR]->(ptForecast),
+(mXGB)-[:SUITABLE_FOR]->(ptForecast),
+(mLGBM)-[:SUITABLE_FOR]->(ptForecast),
+(mXGB)-[:SUITABLE_FOR]->(ptClassify),
+(mLGBM)-[:SUITABLE_FOR]->(ptClassify),
+(mRF)-[:SUITABLE_FOR]->(ptClassify),
+(mSVR)-[:SUITABLE_FOR]->(ptClassify),
+(mLSTM)-[:SUITABLE_FOR]->(ptClassify),
+(mGRU)-[:SUITABLE_FOR]->(ptClassify),
+(mCNN1D)-[:SUITABLE_FOR]->(ptClassify),
+(mTCN)-[:SUITABLE_FOR]->(ptClassify),
+(mTransformer)-[:SUITABLE_FOR]->(ptClassify),
+(mIsoForest)-[:SUITABLE_FOR]->(ptAnomaly),
+(mLOF)-[:SUITABLE_FOR]->(ptAnomaly),
+(mAE)-[:SUITABLE_FOR]->(ptAnomaly),
+(mSR)-[:SUITABLE_FOR]->(ptAnomaly),
+(mLSTM)-[:SUITABLE_FOR]->(ptAnomaly),
+(mLSTM)-[:SUITABLE_FOR]->(ptRUL),
+(mGRU)-[:SUITABLE_FOR]->(ptRUL),
+(mTCN)-[:SUITABLE_FOR]->(ptRUL),
+(mXGB)-[:SUITABLE_FOR]->(ptRUL),
+(mRF)-[:SUITABLE_FOR]->(ptRUL),
+(mTFT)-[:SUITABLE_FOR]->(ptRUL),
+(mCNN1D)-[:SUITABLE_FOR]->(ptRUL),
+
+// PredictionType EVALUATED_BY Metric
+(ptForecast)-[:EVALUATED_BY]->(emMAE),
+(ptForecast)-[:EVALUATED_BY]->(emRMSE),
+(ptForecast)-[:EVALUATED_BY]->(emMAPE),
+(ptForecast)-[:EVALUATED_BY]->(emMASE),
+(ptForecast)-[:EVALUATED_BY]->(emCRPS),
+(ptClassify)-[:EVALUATED_BY]->(emF1),
+(ptClassify)-[:EVALUATED_BY]->(emAUROC),
+(ptClassify)-[:EVALUATED_BY]->(emMCC),
+(ptAnomaly)-[:EVALUATED_BY]->(emF1),
+(ptAnomaly)-[:EVALUATED_BY]->(emAUPRC),
+(ptAnomaly)-[:EVALUATED_BY]->(emAUROC),
+(ptAnomaly)-[:EVALUATED_BY]->(emMCC),
+(ptRUL)-[:EVALUATED_BY]->(emRULScore),
+(ptRUL)-[:EVALUATED_BY]->(emRMSE),
+(ptRUL)-[:EVALUATED_BY]->(emMAE),
+(ptImpute)-[:EVALUATED_BY]->(emMAE),
+(ptImpute)-[:EVALUATED_BY]->(emRMSE),
+
+// Technique ADDRESSES Concept
+(tADF)-[:ADDRESSES]->(cStationarity),
+(tKPSS)-[:ADDRESSES]->(cStationarity),
+(tRollingStats)-[:ADDRESSES]->(cStationarity),
+(tDiff)-[:ADDRESSES]->(cStationarity),
+(tDetrend)-[:ADDRESSES]->(cStationarity),
+(tDeseason)-[:ADDRESSES]->(cStationarity),
+(tSeasonDecomp)-[:ADDRESSES]->(cSeasonality),
+(tSTL)-[:ADDRESSES]->(cSeasonality),
+(tDeseason)-[:ADDRESSES]->(cSeasonality),
+(tACF)-[:ADDRESSES]->(cAutocorrelation),
+(tLagPlot)-[:ADDRESSES]->(cAutocorrelation),
+(tPACF)-[:ADDRESSES]->(cPACF),
+(tExpandCV)-[:ADDRESSES]->(cLeakage),
+(tSlidingCV)-[:ADDRESSES]->(cLeakage),
+(tResample)-[:ADDRESSES]->(cIrregular),
+(tTimeAlign)-[:ADDRESSES]->(cIrregular),
+(tMinMax)-[:ADDRESSES]->(cNormalization),
+(tZStd)-[:ADDRESSES]->(cNormalization),
+(tRobust)-[:ADDRESSES]->(cNormalization),
+(tCPDetect)-[:ADDRESSES]->(cChangePoint),
+(tGranger)-[:ADDRESSES]->(cCausality),
+(tSMOTETS)-[:ADDRESSES]->(cImbalanceTS),
+
+// Concept LEARN_BEFORE chain
+(cTemporalDep)-[:LEARN_BEFORE]->(cAutocorrelation),
+(cAutocorrelation)-[:LEARN_BEFORE]->(cPACF),
+(cTrend)-[:LEARN_BEFORE]->(cSeasonality),
+(cSeasonality)-[:LEARN_BEFORE]->(cCyclicality),
+(cCyclicality)-[:LEARN_BEFORE]->(cNoise),
+(cTrend)-[:LEARN_BEFORE]->(cStationarity),
+(cSeasonality)-[:LEARN_BEFORE]->(cStationarity),
+(cStationarity)-[:LEARN_BEFORE]->(cUnitRoot),
+(cUnitRoot)-[:LEARN_BEFORE]->(cCausality),
+(cHorizon)-[:LEARN_BEFORE]->(cLookback),
+(cLookback)-[:LEARN_BEFORE]->(cLeakage),
+(cTemporalDep)-[:LEARN_BEFORE]->(cLeakage),
+(cLeakage)-[:LEARN_BEFORE]->(cDrift),
+(cChangePoint)-[:LEARN_BEFORE]->(cDrift),
+(cAnomalyTypes)-[:LEARN_BEFORE]->(cImbalanceTS),
+(cChangePoint)-[:LEARN_BEFORE]->(cRUL),
+
+// UseCase APPLIES PredictionType
+(ucPredMaint)-[:APPLIES]->(ptRUL),
+(ucPredMaint)-[:APPLIES]->(ptAnomaly),
+(ucPredMaint)-[:APPLIES]->(ptClassify),
+(ucEnergy)-[:APPLIES]->(ptForecast),
+(ucFinancial)-[:APPLIES]->(ptForecast),
+(ucFinancial)-[:APPLIES]->(ptAnomaly),
+(ucFinancial)-[:APPLIES]->(ptChangePoint),
+(ucIoT)-[:APPLIES]->(ptAnomaly),
+(ucIoT)-[:APPLIES]->(ptImpute),
+(ucHealthcare)-[:APPLIES]->(ptClassify),
+(ucHealthcare)-[:APPLIES]->(ptAnomaly),
+(ucSales)-[:APPLIES]->(ptForecast),
+(ucWeather)-[:APPLIES]->(ptForecast),
+(ucNetworkAD)-[:APPLIES]->(ptAnomaly),
+(ucNetworkAD)-[:APPLIES]->(ptClassify),
+
+// BestPractice APPLIES_TO Stage
+(bpSplit)-[:APPLIES_TO]->(stageSampling),
+(bpFitTrain)-[:APPLIES_TO]->(stagePreprocess),
+(bpBaseline)-[:APPLIES_TO]->(stageModel),
+(bpResidual)-[:APPLIES_TO]->(stageEval),
+(bpUncertain)-[:APPLIES_TO]->(stageEval),
+(bpTSCV)-[:APPLIES_TO]->(stageSampling),
+(bpMonitor)-[:APPLIES_TO]->(stageDeploy),
+
+// AntiPattern WARNS_ABOUT Stage
+(apRandSplit)-[:WARNS_ABOUT]->(stageSampling),
+(apFitAll)-[:WARNS_ABOUT]->(stagePreprocess),
+(apNoStation)-[:WARNS_ABOUT]->(stageModel),
+(apSMOTEFirst)-[:WARNS_ABOUT]->(stageAugment),
+(apLookAhead)-[:WARNS_ABOUT]->(stageFeature),
+(apOneMetric)-[:WARNS_ABOUT]->(stageEval),
+(apNoBaseline)-[:WARNS_ABOUT]->(stageModel),
+
+// LearningPath COVERS PredictionType
+(lpForecasting)-[:COVERS]->(ptForecast),
+(lpAnomaly)-[:COVERS]->(ptAnomaly),
+(lpAnomaly)-[:COVERS]->(ptChangePoint),
+(lpDL)-[:COVERS]->(ptForecast),
+(lpDL)-[:COVERS]->(ptClassify),
+(lpDL)-[:COVERS]->(ptRUL),
+(lpRUL)-[:COVERS]->(ptRUL),
+(lpRUL)-[:COVERS]->(ptAnomaly),
+(lpRUL)-[:COVERS]->(ptPHM),
+
+// LearningPath RECOMMENDED_FOR UseCase
+(lpForecasting)-[:RECOMMENDED_FOR]->(ucEnergy),
+(lpForecasting)-[:RECOMMENDED_FOR]->(ucSales),
+(lpForecasting)-[:RECOMMENDED_FOR]->(ucWeather),
+(lpAnomaly)-[:RECOMMENDED_FOR]->(ucIoT),
+(lpAnomaly)-[:RECOMMENDED_FOR]->(ucNetworkAD),
+(lpAnomaly)-[:RECOMMENDED_FOR]->(ucFinancial),
+(lpDL)-[:RECOMMENDED_FOR]->(ucHealthcare),
+(lpRUL)-[:RECOMMENDED_FOR]->(ucPredMaint)
