@@ -404,7 +404,7 @@ with st.sidebar:
     st.markdown('<div class="panel-header">Knowledge Graph</div>', unsafe_allow_html=True)
 
     now = time.time()
-    if now - st.session_state.last_kg_refresh > 5:
+    if now - st.session_state.last_kg_refresh > 2:
         kg                               = get_kg_data()
         st.session_state.kg_data         = kg
         st.session_state.kg_visible      = kg.get("visible", False)
@@ -617,8 +617,10 @@ with col_left:
         )
         new_kg_view = "fods" if kg_choice == "FODS Curriculum" else "timeseries"
         if new_kg_view != st.session_state.kg_view:
-            st.session_state.kg_view        = new_kg_view
-            st.session_state.last_kg_refresh = 0  # force refresh
+            st.session_state.kg_view         = new_kg_view
+            st.session_state.last_kg_refresh = 0
+            st.session_state.kg_data         = None  # clear stale data
+            st.rerun()
 
         if st.session_state.kg_view == "timeseries":
             subview_choice = st.selectbox(
@@ -631,7 +633,9 @@ with col_left:
             )
             if subview_choice != st.session_state.get("kg_subview", "pipeline"):
                 st.session_state.kg_subview      = subview_choice
-                st.session_state.last_kg_refresh = 0  # force refresh
+                st.session_state.last_kg_refresh = 0
+                st.session_state.kg_data         = None  # clear stale data
+                st.rerun()
 
         st.markdown("---")
         st.markdown('<div class="panel-header">Export</div>', unsafe_allow_html=True)
