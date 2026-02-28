@@ -203,6 +203,7 @@ for key, val in {
     "student_id": f"student_{random.randint(1000, 9999)}",
     "current_concept": None, "current_question": None, "assessment_result": None,
     "kg_data": None, "kg_visible": False, "last_kg_refresh": 0,
+    "kg_view": "fods", "kg_subview": "pipeline",
     "response_style": "Balanced", "difficulty_override": "Auto",
     "ingestion_done": False,
 }.items():
@@ -277,7 +278,12 @@ def get_kg_data() -> dict:
     if not COMPONENTS_LOADED:
         return {"elements": {"nodes": [], "edges": []}, "node_count": 0, "visible": False}
     try:
-        return components["neo4j"].to_cytoscape_json()
+        neo4j = components["neo4j"]
+        view  = st.session_state.get("kg_view", "fods")
+        if view == "timeseries":
+            subview = st.session_state.get("kg_subview", "pipeline")
+            return neo4j.to_cytoscape_json_pipeline(view=subview)
+        return neo4j.to_cytoscape_json()
     except Exception:
         return {"elements": {"nodes": [], "edges": []}, "node_count": 0, "visible": False}
 
@@ -600,6 +606,32 @@ with col_left:
             label_visibility="collapsed"
         )
         st.caption("Auto uses your learning history to set the level.")
+
+        st.markdown("---")
+        st.markdown('<div class="panel-header">Knowledge Graph</div>', unsafe_allow_html=True)
+        kg_choice = st.selectbox(
+            "Active Knowledge Graph",
+            ["FODS Curriculum", "Time Series"],
+            index=0 if st.session_state.kg_view == "fods" else 1,
+            label_visibility="collapsed"
+        )
+        new_kg_view = "fods" if kg_choice == "FODS Curriculum" else "timeseries"
+        if new_kg_view != st.session_state.kg_view:
+            st.session_state.kg_view        = new_kg_view
+            st.session_state.last_kg_refresh = 0  # force refresh
+
+        if st.session_state.kg_view == "timeseries":
+            subview_choice = st.selectbox(
+                "Time Series View",
+                ["pipeline", "models", "concepts", "full"],
+                index=["pipeline", "models", "concepts", "full"].index(
+                    st.session_state.get("kg_subview", "pipeline")
+                ),
+                label_visibility="collapsed"
+            )
+            if subview_choice != st.session_state.get("kg_subview", "pipeline"):
+                st.session_state.kg_subview      = subview_choice
+                st.session_state.last_kg_refresh = 0  # force refresh
 
         st.markdown("---")
         st.markdown('<div class="panel-header">Export</div>', unsafe_allow_html=True)
