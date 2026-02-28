@@ -83,26 +83,34 @@ class SolverAgent:
         rag_docs = self.retriever.retrieve_for_solver(query, topic=None)
         rag_context = "\n\n".join([doc["text"] for doc in rag_docs])
 
-        # 5. Build explanation prompt
+        # 5. Clean RAG context — strip URLs and source noise before injecting
+        import re
+        clean_rag = re.sub(r'https?://[^\s]+', '', rag_context)
+        clean_rag = re.sub(r'_{2,}', '', clean_rag)
+        clean_rag = re.sub(r'[Ss]ource:.*', '', clean_rag)
+        clean_rag = re.sub(r'\n{3,}', '\n\n', clean_rag).strip()
+
+        student_question = message if message else f"Explain {concept}"
+
+        # 6. Build explanation prompt
         user_message = f"""
-Student Level: {student_level}
-Learning Style: {learning_style}
+Student level: {student_level}
+Learning style: {learning_style}
+Student question: {student_question}
+{f"Focus on: {focus}" if focus else ""}
 
-Concept to explain: {concept}
-{f"Specific focus: {focus}" if focus else ""}
+Prerequisites the student is missing: {missing_prereqs if missing_prereqs else "none"}
+Related concepts: {related[:3] if related else "none"}
 
-Prerequisites student is missing: {missing_prereqs if missing_prereqs else "None - student knows all prerequisites"}
-Related concepts to connect: {related[:3] if related else "None"}
+Reference material (use to inform your explanation — never quote or cite directly):
+{clean_rag}
 
-Relevant documentation and examples:
-{rag_context}
-
-Provide a clear step by step explanation.
-{"Start with code, then explain the theory." if learning_style == "code_first" else "Start with the concept, then show code."}
-{"Since student is missing prerequisites, briefly cover them first." if missing_prereqs else ""}
+Write a complete, self-contained explanation. Include a working Python code example.
+{"Lead with code, then explain." if learning_style == "code_first" else "Explain the concept first, then show code."}
+{"Briefly cover the missing prerequisites before the main concept." if missing_prereqs else ""}
 """
 
-        # 6. Generate explanation
+        # 8. Generate explanation
         explanation = self.llm.generate(
             system_prompt=SOLVER_SYSTEM_PROMPT,
             user_message=user_message
