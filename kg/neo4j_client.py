@@ -507,27 +507,26 @@ class Neo4jClient:
                        'ADDRESSES' as relationship
             """)
 
-        else:  # full
+        else:  # full — all TS node types, no isolated nodes
             nodes_raw = self.query("""
                 MATCH (n)
                 WHERE n:PipelineStage OR n:Model OR n:EvalMetric OR n:PredictionType
+                   OR n:BestPractice OR n:AntiPattern OR n:LearningPath
                   OR (n:Concept   AND coalesce(n.kg, 'timeseries') = 'timeseries')
                   OR (n:UseCase   AND coalesce(n.kg, 'timeseries') = 'timeseries')
+                  OR (n:Library   AND coalesce(n.kg, 'timeseries') = 'timeseries')
+                  OR (n:Technique AND coalesce(n.kg, 'timeseries') = 'timeseries')
                 RETURN n.name as name,
                        labels(n)[0] as label_type,
-                       coalesce(n.description, n.family, '') as description
+                       coalesce(n.description, n.family, n.use, '') as description
             """)
             edges_raw = self.query("""
                 MATCH (a)-[r]->(b)
-                WHERE (a:PipelineStage OR a:Model OR a:EvalMetric OR a:PredictionType
-                  OR (a:Concept AND coalesce(a.kg, 'timeseries') = 'timeseries')
-                  OR (a:UseCase AND coalesce(a.kg, 'timeseries') = 'timeseries'))
-                  AND (b:PipelineStage OR b:Model OR b:EvalMetric OR b:PredictionType
-                  OR (b:Concept AND coalesce(b.kg, 'timeseries') = 'timeseries')
-                  OR (b:UseCase AND coalesce(b.kg, 'timeseries') = 'timeseries'))
+                WHERE coalesce(a.kg, 'timeseries') = 'timeseries'
+                  AND coalesce(b.kg, 'timeseries') = 'timeseries'
                 RETURN a.name as source, b.name as target,
                        type(r) as relationship
-                LIMIT 300
+                LIMIT 500
             """)
 
         cytoscape_nodes = []
