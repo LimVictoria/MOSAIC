@@ -147,6 +147,7 @@ def load_components():
     from agents.solver_agent import SolverAgent
     from agents.assessment_agent import AssessmentAgent
     from agents.feedback_agent import FeedbackAgent
+    from agents.recommender_agent import RecommenderAgent
     from agents.orchestrator import Orchestrator
 
     llm          = LLMClient()
@@ -157,11 +158,12 @@ def load_components():
     solver       = SolverAgent(llm, retriever, neo4j, letta)
     assessment   = AssessmentAgent(llm, retriever, neo4j, letta)
     feedback     = FeedbackAgent(llm, retriever, neo4j, letta)
-    orchestrator = Orchestrator(solver, assessment, feedback, neo4j, letta)
+    recommender  = RecommenderAgent(llm, retriever, neo4j, letta)
+    orchestrator = Orchestrator(solver, recommender, assessment, feedback, neo4j, letta)
     return {
         "llm": llm, "embedder": embedder, "retriever": retriever, "neo4j": neo4j, "letta": letta,
         "solver": solver, "assessment": assessment,
-        "feedback": feedback, "orchestrator": orchestrator,
+        "feedback": feedback, "recommender": recommender, "orchestrator": orchestrator,
     }
 
 try:
