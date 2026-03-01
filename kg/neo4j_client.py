@@ -215,23 +215,33 @@ class Neo4jClient:
             return results[0]["path"]
         return [target_topic]
 
-    def get_next_recommended_topic(self) -> str:
-        cypher = """
-        MATCH (t:Topic)
-        WHERE coalesce(t.kg, 'fods') = 'fods'
-          AND coalesce(t.status, 'grey') <> 'green'
-          AND NOT EXISTS {
-              MATCH (t)-[:PREREQUISITE]->(pre:Topic)
-              WHERE coalesce(pre.status, 'grey') <> 'green'
-          }
-        RETURN t.name as name
-        ORDER BY t.name
-        LIMIT 1
-        """
-        results = self.query(cypher)
-        if results:
-            return results[0]["name"]
-        return "Python for Data Science"
+    def get_next_recommended_topic(self, kg: str = 'fods') -> str:
+        if kg == 'timeseries':
+            # Return the first unmastered PipelineStage in order
+            cypher = """
+            MATCH (n:PipelineStage)
+            WHERE coalesce(n.status, 'grey') <> 'green'
+            RETURN n.name as name
+            ORDER BY n.order
+            LIMIT 1
+            """
+            results = self.query(cypher)
+            return results[0]["name"] if results else "Data Ingestion"
+        else:
+            cypher = """
+            MATCH (t:Topic)
+            WHERE coalesce(t.kg, 'fods') = 'fods'
+              AND coalesce(t.status, 'grey') <> 'green'
+              AND NOT EXISTS {
+                  MATCH (t)-[:PREREQUISITE]->(pre:Topic)
+                  WHERE coalesce(pre.status, 'grey') <> 'green'
+              }
+            RETURN t.name as name
+            ORDER BY t.name
+            LIMIT 1
+            """
+            results = self.query(cypher)
+            return results[0]["name"] if results else "Python for Data Science"
 
     def map_concept_to_topic(self, concept_name: str, kg: str = 'fods') -> str:
         """Map a free-text concept to the nearest node in the active KG."""
