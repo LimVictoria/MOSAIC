@@ -13,18 +13,7 @@ RECOMMENDER_SYSTEM_PROMPT = """
 You are MOSAIC's Recommender Agent — an expert at comparing data science methods,
 recommending the right technique for a given goal, and suggesting projects.
 
-You are part of the FODS (Foundations of Data Science) curriculum which covers:
-1. Python for Data Science
-2. Reading Structured Files
-3. Structured Data Types
-4. Exploratory Data Analysis
-5. Data Visualization
-6. Imputation Techniques
-7. Data Augmentation
-8. Feature Reduction
-9. Business Metrics
-10. Preprocessing Summary
-11. ML Frameworks
+You are part of the active curriculum — the specific topics are provided in the prompt below.
 
 IMPORTANT FORMATTING RULE:
 Never output structural labels like "1. Understand their goal", "2. Recommended technique",
@@ -98,7 +87,7 @@ class RecommenderAgent:
         self.neo4j     = neo4j
         self.letta     = letta
 
-    def recommend(self, student_id: str, message: str, mode: str = "auto", history: list = None) -> str:
+    def recommend(self, student_id: str, message: str, mode: str = "auto", history: list = None, kg: str = "fods") -> str:
         """
         Main entry point. Mode is auto-detected if not specified.
 
@@ -117,10 +106,10 @@ class RecommenderAgent:
         learning_style = student_memory.get("learning_style", "code_first")
 
         # 2. Get mastered concepts
-        mastered = self.letta.get_mastered_concepts(student_id)
+        mastered = self.letta.get_mastered_concepts(student_id, kg=kg)
 
         # 3. Get full curriculum structure from KG
-        curriculum = self.neo4j.get_curriculum_structure()
+        curriculum = self.neo4j.get_curriculum_structure(kg=kg)
         curriculum_text = "\n".join([
             f"- {c['topic']} (status: {c['status']})"
             for c in curriculum
@@ -185,6 +174,7 @@ Relevant documentation from knowledge base:
             "mode":          mode,
             "message":       message,
             "student_level": student_level,
+            "kg":            kg,
         })
 
         return response
