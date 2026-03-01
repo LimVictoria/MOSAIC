@@ -104,10 +104,24 @@ class SolverAgent:
 
         student_question = message if message else f"Explain {concept}"
 
+        # Format conversation history so solver remembers prior context
+        history_text = ""
+        if history:
+            turns = []
+            for m in (history or [])[-10:]:
+                role    = "Student" if m["role"] == "user" else "Tutor"
+                max_len = 1200 if role == "Tutor" else 500
+                text    = m["content"][:max_len] + ("..." if len(m["content"]) > max_len else "")
+                turns.append(f"{role}: {text}")
+            if turns:
+                history_text = "Recent conversation (use this — the student may reference prior topics):\n" + "\n".join(turns)
+
         # 6. Build explanation prompt
         user_message = f"""
 Student level: {student_level}
 Learning style: {learning_style}
+
+{history_text if history_text else "Recent conversation: (none)"}
 
 STUDENT QUESTION: {student_question}
 {f"Focus specifically on: {focus}" if focus else ""}
