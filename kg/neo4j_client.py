@@ -148,17 +148,26 @@ class Neo4jClient:
 
     # ── Curriculum structure reads ─────────────────
 
-    def get_curriculum_structure(self) -> list[dict]:
-        cypher = """
-        MATCH (t:Topic)
-        WHERE coalesce(t.kg, 'fods') = 'fods'
-        OPTIONAL MATCH (t)-[:PREREQUISITE]->(pre:Topic)
-        WHERE coalesce(pre.kg, 'fods') = 'fods'
-        RETURN t.name as topic,
-               coalesce(t.status, 'grey') as status,
-               collect(pre.name) as prerequisites
-        ORDER BY t.name
-        """
+    def get_curriculum_structure(self, kg: str = 'fods') -> list[dict]:
+        if kg == 'timeseries':
+            cypher = """
+            MATCH (n:PipelineStage)
+            RETURN n.name as topic,
+                   coalesce(n.status, 'grey') as status,
+                   [] as prerequisites
+            ORDER BY n.order
+            """
+        else:
+            cypher = """
+            MATCH (t:Topic)
+            WHERE coalesce(t.kg, 'fods') = 'fods'
+            OPTIONAL MATCH (t)-[:PREREQUISITE]->(pre:Topic)
+            WHERE coalesce(pre.kg, 'fods') = 'fods'
+            RETURN t.name as topic,
+                   coalesce(t.status, 'grey') as status,
+                   collect(pre.name) as prerequisites
+            ORDER BY t.name
+            """
         return self.query(cypher)
 
     def get_topic_techniques(self, topic_name: str) -> list[dict]:
@@ -224,31 +233,41 @@ class Neo4jClient:
             return results[0]["name"]
         return "Python for Data Science"
 
-    def map_concept_to_topic(self, concept_name: str) -> str:
-        cypher = """
-        MATCH (t:Topic)
-        WHERE toLower(t.name) CONTAINS toLower($name)
-           OR toLower($name) CONTAINS toLower(t.name)
-        RETURN t.name as name
-        LIMIT 1
-        """
-        results = self.query(cypher, {"name": concept_name})
-        if results:
-            return results[0]["name"]
-
-        cypher2 = """
-        MATCH (tech:Technique)
-        WHERE coalesce(tech.kg, 'fods') = 'fods'
-          AND (toLower(tech.name) CONTAINS toLower($name)
-           OR toLower($name) CONTAINS toLower(tech.name))
-        RETURN tech.name as name
-        LIMIT 1
-        """
-        results2 = self.query(cypher2, {"name": concept_name})
-        if results2:
-            return results2[0]["name"]
-
-        return None
+    def map_concept_to_topic(self, concept_name: str, kg: str = 'fods') -> str:
+        """Map a free-text concept to the nearest node in the active KG."""
+        if kg == 'timeseries':
+            cypher = """
+            MATCH (n)
+            WHERE coalesce(n.kg, 'timeseries') = 'timeseries'
+              AND (toLower(n.name) CONTAINS toLower($name)
+               OR toLower($name) CONTAINS toLower(n.name))
+            RETURN n.name as name
+            LIMIT 1
+            """
+            results = self.query(cypher, {"name": concept_name})
+            return results[0]["name"] if results else concept_name
+        else:
+            cypher = """
+            MATCH (t:Topic)
+            WHERE coalesce(t.kg, 'fods') = 'fods'
+              AND (toLower(t.name) CONTAINS toLower($name)
+               OR toLower($name) CONTAINS toLower(t.name))
+            RETURN t.name as name
+            LIMIT 1
+            """
+            results = self.query(cypher, {"name": concept_name})
+            if results:
+                return results[0]["name"]
+            cypher2 = """
+            MATCH (tech:Technique)
+            WHERE coalesce(tech.kg, 'fods') = 'fods'
+              AND (toLower(tech.name) CONTAINS toLower($name)
+               OR toLower($name) CONTAINS toLower(tech.name))
+            RETURN tech.name as name
+            LIMIT 1
+            """
+            results2 = self.query(cypher2, {"name": concept_name})
+            return results2[0]["name"] if results2 else None
 
     # ── KG visibility ──────────────────────────────
 
