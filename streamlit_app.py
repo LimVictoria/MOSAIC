@@ -237,10 +237,13 @@ def call_chat(message: str) -> dict:
     if not COMPONENTS_LOADED:
         return {"response": f"Error: {LOAD_ERROR}", "agent": "System"}
     try:
-        orch     = components["orchestrator"]
+        orch    = components["orchestrator"]
+        # Pass last 10 messages so LLM remembers recent conversation
+        history = st.session_state.get("messages", [])[-10:]
         response = orch.route(
             student_id=st.session_state.student_id,
             message=message,
+            history=history,
             kg=st.session_state.get("kg_view", "fods")
         )
         return {"response": response, "agent": orch.last_agent_used}
