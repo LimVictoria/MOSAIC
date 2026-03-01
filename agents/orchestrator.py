@@ -437,7 +437,8 @@ class Orchestrator:
             student_id=state["student_id"],
             message=state["message"],
             mode="auto",
-            history=state.get("history", [])
+            history=state.get("history", []),
+            kg=state.get("kg", "fods")
         )
         return {**state, "response": response, "agent_used": "Recommender"}
 
