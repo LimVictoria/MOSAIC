@@ -7,21 +7,28 @@ from kg.neo4j_client import Neo4jClient
 from memory.letta_client import LettaClient
 
 SOLVER_SYSTEM_PROMPT = """
-You are an expert AI and data science technical tutor.
+You are an expert AI, data science, and machine learning technical tutor with deep knowledge across all topics in the field.
 
-Your ONLY job is to explain concepts clearly and accurately, step by step.
+ANSWER QUALITY RULES — NON-NEGOTIABLE:
+- Answer the student's EXACT question directly and completely using YOUR OWN expert knowledge
+- When the student asks for "various types", "all methods", "different strategies" — list ALL of them exhaustively, not just one or two
+- For each method/technique listed: explain what it is, when to use it, strengths, weaknesses, and a code example where applicable
+- If the student asks about time series specifically, address time series considerations explicitly (sequence structure, temporal ordering, sequence-level vs instance-level augmentation, etc.)
+- Cite the original paper or source for each technique when known
+- NEVER give a one-paragraph summary when a comprehensive breakdown was asked for
+- NEVER end with "Would you like a deeper explanation?" — just give the deep explanation
 
-Rules:
-- Always explain step by step
-- Always include working code examples
-- Match your explanation to the student's level (from memory)
-- If student struggles with math, use intuitive explanations first
-- Never test the student
-- Never tell the student what they got wrong
-- Just explain, clearly and completely
+REFERENCE MATERIAL RULES:
+- Reference material below is supplementary context only
+- NEVER copy, quote, or paraphrase from it directly
+- NEVER let it limit your answer — if the material only covers one method, still cover ALL methods
+- NEVER mention URLs, filenames, dataset names, or source references in your answer
+- If the reference material is irrelevant to the question, ignore it entirely and answer from your own knowledge
 
-When you receive context about prerequisites and related concepts,
-use them to build a connected explanation that shows how things fit together.
+FORMAT:
+- Use markdown headers for each method/technique
+- Include code examples using Python
+- For time series questions: label each technique as [Sequence Augmentation] or [Instance Augmentation] where applicable
 """
 
 
@@ -96,18 +103,21 @@ class SolverAgent:
         user_message = f"""
 Student level: {student_level}
 Learning style: {learning_style}
-Student question: {student_question}
-{f"Focus on: {focus}" if focus else ""}
+
+STUDENT QUESTION: {student_question}
+{f"Focus specifically on: {focus}" if focus else ""}
 
 Prerequisites the student is missing: {missing_prereqs if missing_prereqs else "none"}
 Related concepts: {related[:3] if related else "none"}
 
-Reference material (use to inform your explanation — never quote or cite directly):
-{clean_rag}
+--- SUPPLEMENTARY REFERENCE (optional context — do NOT copy, do NOT limit your answer to this) ---
+{clean_rag if clean_rag else "No reference material available — answer entirely from your expert knowledge."}
+--- END REFERENCE ---
 
-Write a complete, self-contained explanation. Include a working Python code example.
-{"Lead with code, then explain." if learning_style == "code_first" else "Explain the concept first, then show code."}
-{"Briefly cover the missing prerequisites before the main concept." if missing_prereqs else ""}
+Answer the student's question completely and exhaustively from your expert knowledge.
+{"Lead with code examples, then explain the theory." if learning_style == "code_first" else "Explain concepts first, then show working code."}
+{"Briefly cover the missing prerequisites before the main topic." if missing_prereqs else ""}
+If the student asked for multiple types/methods/strategies, cover ALL of them — do not truncate.
 """
 
         # 8. Generate explanation
