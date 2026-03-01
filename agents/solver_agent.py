@@ -154,8 +154,9 @@ If the student asked for multiple types/methods/strategies, cover ALL of them â€
             "approach": learning_style
         })
 
-        # 8. Update KG node to blue (currently studying)
-        self.neo4j.update_node_status(concept, "blue", kg=kg)
+        # 8. Resolve concept to actual KG node name, then update status to blue
+        mapped = self.neo4j.map_concept_to_topic(concept, kg=kg) or concept
+        self.neo4j.update_node_status(mapped, "blue", kg=kg)
 
         return explanation
 
