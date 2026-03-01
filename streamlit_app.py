@@ -500,6 +500,9 @@ with col_left:
             st.session_state.messages.append({
                 "role": "assistant", "content": r["response"],
                 "agent": r.get("agent", "Solver")})
+            # Force KG sidebar to re-fetch so status color changes appear immediately
+            st.session_state.last_kg_refresh = 0
+            st.session_state.kg_data         = None
             st.rerun()
 
         st.markdown("---")
@@ -597,6 +600,8 @@ with col_left:
                     st.session_state.messages.append({
                         "role": "assistant", "content": r["response"],
                         "agent": r.get("agent", "Solver")})
+                    st.session_state.last_kg_refresh = 0
+                    st.session_state.kg_data         = None
                     st.rerun()
 
     # ── ASSESSMENT ──
