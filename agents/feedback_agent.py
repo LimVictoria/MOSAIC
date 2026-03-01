@@ -88,7 +88,7 @@ class FeedbackAgent:
         misconception  = assessment_result.get("misconception", "")
 
         # Map concept to curriculum Topic node
-        matched_topic = self.neo4j.map_concept_to_topic(concept)
+        matched_topic = self.neo4j.map_concept_to_topic(concept, kg=kg)
         topic_to_use  = matched_topic if matched_topic else concept
 
         # 1. Read mistake history from Letta
