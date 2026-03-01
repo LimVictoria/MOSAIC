@@ -73,7 +73,7 @@ class AssessmentAgent:
         student_level  = student_memory.get("current_level", "intermediate")
 
         # Map to curriculum topic first
-        matched_topic = self.neo4j.map_concept_to_topic(concept)
+        matched_topic = self.neo4j.map_concept_to_topic(concept, kg=kg)
         topic_to_use  = matched_topic if matched_topic else concept
 
         # Get techniques under this topic for detailed questions
