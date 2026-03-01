@@ -131,12 +131,22 @@ class LettaClient:
         filtered = [r for r in records if any(w in json.dumps(r).lower() for w in q_words)]
         return filtered[:10]
 
-    def get_mastered_concepts(self, student_id: str) -> list[str]:
+    def get_mastered_concepts(self, student_id: str, kg: str = None) -> list[str]:
         try:
             records = self.search_archival_memory(student_id, "mastered concept assessment passed")
-            mastered = [r.get("concept", "") for r in records if r.get("type") == "feedback_given" and r.get("passed")]
-            core = self.read_core_memory(student_id)
-            core_mastered = core.get("mastered_concepts", [])
+            mastered = [
+                r.get("topic") or r.get("concept", "")
+                for r in records
+                if r.get("type") == "feedback_given"
+                and r.get("passed")
+                and (kg is None or r.get("kg", "fods") == kg)
+            ]
+            core          = self.read_core_memory(student_id)
+            kg_key        = f"mastered_concepts_{kg}" if kg else "mastered_concepts"
+            core_mastered = core.get(kg_key, [])
+            # Backwards compatibility — fall back to legacy key for fods
+            if not core_mastered and kg == "fods":
+                core_mastered = core.get("mastered_concepts", [])
             return list(set([c for c in mastered + core_mastered if c]))
         except Exception:
             return []
