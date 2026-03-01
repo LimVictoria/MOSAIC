@@ -63,7 +63,7 @@ class AssessmentAgent:
         self.neo4j    = neo4j
         self.letta    = letta
 
-    def generate_question(self, student_id: str, concept: str) -> dict:
+    def generate_question(self, student_id: str, concept: str, kg: str = "fods") -> dict:
         """
         Generate one assessment question for a concept.
         Maps concept to nearest curriculum Topic.
@@ -128,16 +128,17 @@ Return ONLY this JSON:
                 "concept":       concept,
                 "topic":         topic_to_use,
                 "question":      question_data.get("question", ""),
-                "question_type": question_data.get("question_type", "")
+                "question_type": question_data.get("question_type", ""),
+                "kg":            kg
             })
 
             # Set curriculum Topic node to yellow — being assessed
-            self.neo4j.update_node_status(topic_to_use, "yellow")
+            self.neo4j.update_node_status(topic_to_use, "yellow", kg=kg)
 
             return question_data
 
         except json.JSONDecodeError:
-            self.neo4j.update_node_status(topic_to_use, "yellow")
+            self.neo4j.update_node_status(topic_to_use, "yellow", kg=kg)
             return {
                 "question":               f"Explain {concept} in your own words and provide a code example.",
                 "question_type":          "explanation",
@@ -196,7 +197,8 @@ Return ONLY this JSON:
                 "passed":         result.get("passed", False),
                 "what_was_right": result.get("what_was_right", []),
                 "what_was_wrong": result.get("what_was_wrong", []),
-                "misconception":  result.get("misconception", "")
+                "misconception":  result.get("misconception", ""),
+                "kg":             kg
             })
 
             return result
