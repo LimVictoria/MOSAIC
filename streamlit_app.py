@@ -222,7 +222,8 @@ if COMPONENTS_LOADED and "kg_synced" not in st.session_state:
     try:
         letta  = components["letta"]
         neo4j  = components["neo4j"]
-        mastered = letta.get_mastered_concepts(st.session_state.student_id)
+        kg       = st.session_state.get("kg_view", "fods")
+        mastered = letta.get_mastered_concepts(st.session_state.student_id, kg=kg)
         if mastered:
             neo4j.sync_mastery_from_letta(mastered)
     except Exception:
@@ -253,7 +254,8 @@ def call_get_question(concept: str) -> dict:
         return components["assessment"].generate_question(
             student_id=st.session_state.student_id,
             concept=concept,
-            kg=st.session_state.get("kg_view", "fods"))
+            kg=st.session_state.get("kg_view", "fods")
+        )
     except Exception as e:
         st.error(f"Question error: {e}")
         return {}
@@ -502,11 +504,13 @@ with col_left:
         # Shows topics student hasn't mastered yet, starting from prerequisites
         def get_quick_topics() -> list[str]:
             """
-            Return suggested topics based on student progress.
-            Prioritises unmastered prerequisite topics first.
-            Falls back to curriculum starting topics if nothing in memory.
+            Return suggested topics based on active KG and student progress.
+            FODS and TS have separate topic maps and defaults.
             """
-            default_topics = [
+            kg_view = st.session_state.get("kg_view", "fods")
+
+            # ── FODS defaults and topic map ──
+            fods_defaults = [
                 "How do I read a CSV file in Python?",
                 "What is a DataFrame?",
                 "How do I read an Excel file?",
@@ -514,54 +518,67 @@ with col_left:
                 "What are the structured data types in Python?",
                 "How do I detect missing values?",
             ]
-            if not COMPONENTS_LOADED:
-                return default_topics
-            try:
-                mastered = components["letta"].get_mastered_concepts(
-                    st.session_state.student_id)
-                # Get next recommended topic from curriculum KG
-                next_topic = components["neo4j"].get_next_recommended_topic()
-                # Get unmastered prerequisites for next topic
-                unmastered = components["neo4j"].get_unmastered_prerequisites(
-                    next_topic) if next_topic else []
+            fods_topic_map = {
+                "Python for Data Science":   "What Python libraries do I need for data science?",
+                "Reading Structured Files":  "How do I read a CSV file in Python?",
+                "Structured Data Types":     "What is a DataFrame and how do I use it?",
+                "Exploratory Data Analysis": "What is Exploratory Data Analysis?",
+                "Data Visualization":        "How do I create a heatmap in Python?",
+                "Imputation Techniques":     "How do I handle missing values?",
+                "Data Augmentation":         "What is SMOTE and when should I use it?",
+                "Feature Reduction":         "What is PCA and how does it work?",
+                "Business Metrics":          "What are the key business metrics in data science?",
+                "Preprocessing Summary":     "What is a data preprocessing pipeline?",
+                "ML Frameworks":             "What is the difference between PyTorch and TensorFlow?",
+            }
 
-                # Build prompt suggestions from unmastered topics
-                topic_to_prompt = {
-                    "Python for Data Science":     "What Python libraries do I need for data science?",
-                    "Reading Structured Files":    "How do I read a CSV file in Python?",
-                    "Structured Data Types":       "What is a DataFrame and how do I use it?",
-                    "Exploratory Data Analysis":   "What is Exploratory Data Analysis?",
-                    "Data Visualization":          "How do I create a heatmap in Python?",
-                    "Imputation Techniques":       "How do I handle missing values?",
-                    "Data Augmentation":           "What is SMOTE and when should I use it?",
-                    "Feature Reduction":           "What is PCA and how does it work?",
-                    "Business Metrics":            "What are the key business metrics in data science?",
-                    "Preprocessing Summary":       "What is a data preprocessing pipeline?",
-                    "ML Frameworks":               "What is the difference between PyTorch and TensorFlow?",
-                }
+            # ── Time Series defaults and topic map ──
+            ts_defaults = [
+                "What is stationarity and how do I test for it?",
+                "What is the difference between ARIMA and SARIMA?",
+                "How do I detect seasonality in time series data?",
+                "What are the best models for time series forecasting?",
+                "How do I handle missing values in time series?",
+                "What is the ACF and PACF plot used for?",
+            ]
+            ts_topic_map = {
+                "Data Ingestion":         "How do I load and index time series data in pandas?",
+                "EDA":                    "How do I detect seasonality and stationarity in time series?",
+                "Preprocessing":          "How do I handle missing values and outliers in time series?",
+                "Feature Engineering":    "What are the most useful features for time series models?",
+                "Augmentation":           "What are the various types of data augmentation for time series?",
+                "Model Selection":        "What is the difference between ARIMA, Prophet, and LSTM?",
+                "Training & Evaluation":  "How do I evaluate a time series forecasting model?",
+                "Deployment":             "How do I deploy a time series model to production?",
+            }
+
+            if not COMPONENTS_LOADED:
+                return ts_defaults if kg_view == "timeseries" else fods_defaults
+
+            try:
+                kg       = kg_view
+                mastered = components["letta"].get_mastered_concepts(
+                    st.session_state.student_id, kg=kg)
+                next_topic = components["neo4j"].get_next_recommended_topic(kg=kg)
+                topic_map  = ts_topic_map if kg == "timeseries" else fods_topic_map
+                defaults   = ts_defaults  if kg == "timeseries" else fods_defaults
 
                 suggestions = []
-                # Add unmastered prereqs first (most important)
-                for topic in unmastered:
-                    if topic in topic_to_prompt and topic not in mastered:
-                        suggestions.append(topic_to_prompt[topic])
 
-                # Add next recommended topic
-                if next_topic and next_topic in topic_to_prompt:
-                    prompt = topic_to_prompt[next_topic]
-                    if prompt not in suggestions:
-                        suggestions.append(prompt)
+                # Add next recommended topic first
+                if next_topic and next_topic in topic_map:
+                    suggestions.append(topic_map[next_topic])
 
-                # Fill remaining slots with unmastered topics in order
-                for topic, prompt in topic_to_prompt.items():
+                # Fill with unmastered topics in curriculum order
+                for topic, prompt in topic_map.items():
                     if len(suggestions) >= 6:
                         break
                     if topic not in mastered and prompt not in suggestions:
                         suggestions.append(prompt)
 
-                return suggestions[:6] if suggestions else default_topics
+                return suggestions[:6] if suggestions else defaults
             except Exception:
-                return default_topics
+                return ts_defaults if kg_view == "timeseries" else fods_defaults
 
         quick_prompts = get_quick_topics()
 
