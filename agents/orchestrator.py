@@ -262,9 +262,7 @@ class Orchestrator:
         return {**state, "response": response, "agent_used": "Solver"}
 
     def _build_brief_context(self, message: str, history: list, retriever_fn) -> str:
-        """Build user_message with RAG context + history for brief answers.
-        Only includes history block if there are actual messages — prevents hallucination.
-        """
+        """Build user_message with RAG context + history for brief answers."""
         # Fetch RAG
         try:
             rag_docs    = retriever_fn(message)
@@ -272,24 +270,28 @@ class Orchestrator:
         except Exception:
             rag_context = ""
 
-        # Format history — only if non-empty
+        # Format history — include enough context for the LLM to remember recent topics
+        # User messages: full text. Assistant messages: up to 800 chars (enough to capture key content)
         history_text = ""
         if history:
             turns = []
-            for m in history[-6:]:
+            for m in history[-10:]:
                 role = "Student" if m["role"] == "user" else "Tutor"
-                turns.append(f"{role}: {m['content'][:200]}")
+                # Keep full user messages, trim long assistant responses but keep enough context
+                max_len = 1200 if role == "Tutor" else 500
+                content = m["content"][:max_len] + ("..." if len(m["content"]) > max_len else "")
+                turns.append(f"{role}: {content}")
             if turns:
-                history_text = "Recent conversation:\n" + "\n".join(turns) + "\n"
+                history_text = "Recent conversation (use this to resolve references like 'it', 'the dataset', 'you said'):\n" + "\n".join(turns) + "\n"
 
         # Build context block
         parts = []
         if history_text:
             parts.append(history_text)
         else:
-            parts.append("Recent conversation: (none — this is the student's first message)\n")
+            parts.append("Recent conversation: (none — this is the student\'s first message)\n")
 
-        parts.append(f"Retrieved documentation:\n{rag_context if rag_context else 'No documentation retrieved.'}")
+        parts.append(f"Background documentation (use only if directly relevant — ignore if not):\n{rag_context if rag_context else 'None.'}")
         parts.append(f"\nStudent question: {message}")
 
         return "\n".join(parts)
