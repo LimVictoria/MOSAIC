@@ -67,7 +67,8 @@ class FeedbackAgent:
         concept: str,
         question: str,
         student_answer: str,
-        assessment_result: dict
+        assessment_result: dict,
+        kg: str = "fods"
     ) -> dict:
         """
         Give detailed feedback on an assessment result.
@@ -173,21 +174,23 @@ Write feedback that:
             "misconception":  misconception,
             "root_cause":     re_teach_focus,
             "attempt_number": attempt_count,
-            "next_action":    next_action
+            "next_action":    next_action,
+            "kg":             kg
         })
 
         # 9. Update curriculum Topic node color
-        self._update_kg_node(topic_to_use, passed, score, attempt_count, weak_prereqs)
+        self._update_kg_node(topic_to_use, passed, score, attempt_count, weak_prereqs, kg=kg)
 
         # 10. If passed, update Letta mastered concepts with Topic name
         if passed:
             core     = self.letta.read_core_memory(student_id)
-            mastered = core.get("mastered_concepts", [])
+            kg_key   = f"mastered_concepts_{kg}"
+            mastered = core.get(kg_key, [])
             if topic_to_use not in mastered:
                 mastered.append(topic_to_use)
                 self.letta.update_core_memory(student_id, {
-                    "mastered_concepts": mastered,
-                    "current_topic":     topic_to_use
+                    kg_key:          mastered,
+                    "current_topic": topic_to_use
                 })
 
             # Check what topic to recommend next
@@ -236,7 +239,8 @@ Write feedback that:
         passed: bool,
         score: int,
         attempt_count: int,
-        weak_prereqs: list
+        weak_prereqs: list,
+        kg: str = "fods"
     ):
         """
         Update curriculum Topic node color to reflect student understanding.
@@ -249,18 +253,18 @@ Write feedback that:
         """
         if passed:
             # GREEN — student understands this topic
-            self.neo4j.update_node_status(topic, "green")
+            self.neo4j.update_node_status(topic, "green", kg=kg)
 
         elif attempt_count >= 3:
             # RED — failed 3+ times
-            self.neo4j.update_node_status(topic, "red")
+            self.neo4j.update_node_status(topic, "red", kg=kg)
 
         elif weak_prereqs:
             # ORANGE — prerequisite gap is root cause
-            self.neo4j.update_node_status(topic, "orange")
+            self.neo4j.update_node_status(topic, "orange", kg=kg)
             # Also mark the weak prerequisite red
-            self.neo4j.update_node_status(weak_prereqs[0]["name"], "red")
+            self.neo4j.update_node_status(weak_prereqs[0]["name"], "red", kg=kg)
 
         else:
             # YELLOW — failed but still early attempts
-            self.neo4j.update_node_status(topic, "yellow")
+            self.neo4j.update_node_status(topic, "yellow", kg=kg)
