@@ -23,91 +23,30 @@ class TutorState(TypedDict):
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 
-IS_TECHNICAL_PROMPT = """
-You are a message classifier for an AI tutoring system.
+SINGLE_CLASSIFIER_PROMPT = """
+You are a message router for an AI tutoring system.
 
-Is the student's message related to a technical or educational topic (even loosely)?
+Classify the student message into EXACTLY ONE of these categories:
 
-Answer YES if it's about any concept, tool, technology, science, math, or anything educational.
-Answer NO if it's pure casual chat (greetings, small talk, feelings, opinions about non-technical things).
+CHAT     — pure casual chat, greetings, small talk (hi, thanks, how are you, bye)
+ASSESS   — student explicitly wants to be tested/quizzed (test me, quiz me, give me a question)
+COMPARE  — comparing methods, pros/cons, trade-offs, when to use, mathematical differences,
+           what methods exist for a problem, project suggestions, recommendations for a goal
+TEACH    — everything else: what is X, how does X work, explain X, how do I code X, show me X
 
-Reply with ONLY one word: YES or NO.
+Reply with ONLY one word: CHAT, ASSESS, COMPARE, or TEACH.
 """
 
-IS_ASSESSMENT_PROMPT = """
-You are a message classifier.
-
-Is the student explicitly asking to be TESTED or QUIZZED?
-
-Answer YES only if they say things like: "test me", "quiz me", "give me a question", "assess me", "practice questions"
-Answer NO for everything else including normal questions and explanations.
-
-Reply with ONLY one word: YES or NO.
-"""
-
-IS_RECOMMENDER_PROMPT = """
-You are a message classifier for an AI tutoring system.
-
-Should this message be routed to the RECOMMENDER agent?
-
-Route to RECOMMENDER (answer YES) when the student is:
-- Comparing two or more methods (vs, versus, compare, difference between, better than)
-- Asking which technique/method to use for a goal (should I use, what method, recommend, suggest)
-- Asking about pros/cons/trade-offs of methods (pros, cons, advantages, disadvantages, trade-off)
-- Asking why one approach is better than another (why is X better than Y)
-- Asking what methods/techniques exist for a problem (what are the different methods for)
-- Asking mathematical or theoretical differences between approaches (mathematically, math behind)
-- Asking when to use a technique (when should I use, when to use)
-- Asking for a project suggestion (suggest a project, project idea, build a system)
-- Asking for a recommendation for their specific goal (what should I use for fraud detection)
-
-Route to SOLVER (answer NO) when the student is:
-- Asking how to code or implement something (how do I code, show me how to implement)
-- Asking for a step-by-step tutorial on one concept
-- Asking what a single concept means (what is PCA, explain SMOTE)
-- Asking for a code example of one specific thing
-
-Examples:
-"why is TFT better than 1D CNN-LSTM" → YES (comparison)
-"what are the different methods to do resampling" → YES (what methods exist)
-"mathematically, should we use T-SMOTE or ADASYN" → YES (mathematical comparison)
-"how do I code SMOTE in Python" → NO (implementation)
-"explain PCA step by step" → NO (explain one concept)
-"compare SimpleImputer vs KNNImputer" → YES (comparison)
-"what method should I use for imbalanced data" → YES (recommendation)
-"show me how to read a CSV file" → NO (implementation)
-"which is better for fraud detection, SMOTE or random oversampling" → YES (comparison + recommendation)
-"what are the pros and cons of mean imputation" → YES (pros/cons)
-"how do I implement KNN imputer in sklearn" → NO (implementation)
-"when should I use PCA vs t-SNE" → YES (when to use + comparison)
-"walk me through the math behind PCA" → YES (mathematical)
-"how do I drop null values in pandas" → NO (implementation)
-"is feature scaling necessary before PCA" → YES (recommendation)
-"what should I use if my dataset has 95% missing values" → YES (recommendation)
-"suggest a project for churn prediction" → YES (project)
-
-Reply with ONLY one word: YES or NO.
-"""
-
-CONCEPT_EXTRACT_PROMPT = """
-You are a curriculum topic classifier for a data science course.
-
-Map the student's message to the most relevant curriculum topic from this list:
-- Python for Data Science
-- Reading Structured Files
-- Structured Data Types
-- Exploratory Data Analysis
-- Data Visualization
-- Imputation Techniques
-- Data Augmentation
-- Feature Reduction
-- Business Metrics
-- Preprocessing Summary
-- ML Frameworks
-
-Reply with ONLY the exact topic name from the list above.
-If none match clearly, reply with the most relevant topic.
-"""
+FOLLOWUP_KEYWORDS_YES = {
+    "yes", "sure", "please", "go ahead", "yeah", "yep", "definitely",
+    "of course", "elaborate", "more", "tell me more", "explain more",
+    "deeper", "full explanation", "why not", "show me", "give me more",
+    "ok", "okay", "sounds good", "do it", "let's go", "great"
+}
+FOLLOWUP_KEYWORDS_NO = {
+    "no", "nope", "thanks", "that's enough", "i'm good", "ok thanks",
+    "no thanks", "not now", "skip", "never mind", "nevermind", "pass"
+}
 
 BRIEF_ANSWER_PROMPT = """
 You are MOSAIC, a friendly AI tutor specialising in data science.
@@ -240,88 +179,59 @@ class Orchestrator:
         return result.get("response", "I could not process that request.")
 
     def _classify(self, state: TutorState) -> TutorState:
-        message = state["message"].strip().lower()
+        message     = state["message"].strip()
+        msg_lower   = message.lower()
+        msg_words   = set(msg_lower.replace(",", "").replace(".", "").split())
 
-        # 1. Explicit assessment — always takes priority
-        assessment_words = [
-            "test me", "quiz me", "assess me", "give me a question",
-            "practice question", "test my", "test on", "quiz on",
-            "want to test", "want to be tested", "test my understanding",
-            "test on my", "i want to test", "assess my", "check my understanding",
-            "check my knowledge", "practice on", "want to practice",
-        ]
-        if any(w in message for w in assessment_words):
+        # 1. Check if this is a follow-up yes/no to a pending deeper-explanation offer
+        #    Use keywords only — no LLM call needed
+        if self.pending_concept and self.pending_intent:
+            # If the student is asking a NEW question (long message or contains
+            # question words), treat it as a new question and clear pending
+            is_new_question = (
+                len(message.split()) > 8
+                or any(w in msg_lower for w in ["what", "how", "why", "when", "which", "explain", "show"])
+            )
+            if is_new_question:
+                # New question — clear pending and classify normally below
+                self.pending_concept = None
+                self.pending_message = None
+                self.pending_intent  = None
+            elif msg_words & FOLLOWUP_KEYWORDS_YES:
+                concept          = self.pending_concept
+                original_message = self.pending_message or message
+                intent           = self.pending_intent
+                self.pending_concept = None
+                self.pending_message = None
+                self.pending_intent  = None
+                return {**state, "intent": intent, "concept": concept, "message": original_message}
+            elif msg_words & FOLLOWUP_KEYWORDS_NO:
+                self.pending_concept = None
+                self.pending_message = None
+                self.pending_intent  = None
+                return {**state, "intent": "chat"}
+            # else ambiguous short message — fall through to normal classification
+
+        # 2. Single LLM call to classify intent
+        try:
+            label = self.llm.generate(
+                system_prompt=SINGLE_CLASSIFIER_PROMPT,
+                user_message=message
+            ).strip().upper()
+        except Exception:
+            label = "TEACH"
+
+        if label == "CHAT":
+            return {**state, "intent": "chat"}
+        elif label == "ASSESS":
             self.pending_concept = None
             self.pending_message = None
             self.pending_intent  = None
             return {**state, "intent": "assessment"}
-
-        # 2. Check if this is a follow-up yes/no to a pending concept
-        if self.pending_concept and self.pending_intent:
-            try:
-                answer = self.llm.generate(
-                    system_prompt=FOLLOWUP_PROMPT,
-                    user_message=state["message"]
-                ).strip().upper()
-
-                if answer.startswith("YES"):
-                    concept          = self.pending_concept
-                    original_message = self.pending_message or state["message"]
-                    intent           = self.pending_intent
-                    self.pending_concept = None
-                    self.pending_message = None
-                    self.pending_intent  = None
-                    return {
-                        **state,
-                        "intent":  intent,
-                        "concept": concept,
-                        "message": original_message
-                    }
-                else:
-                    self.pending_concept = None
-                    self.pending_message = None
-                    self.pending_intent  = None
-            except Exception:
-                self.pending_concept = None
-                self.pending_message = None
-                self.pending_intent  = None
-
-        # 3. Pure casual chat keywords
-        casual_words = [
-            "hi", "hello", "hey", "how are you", "what do you do",
-            "who are you", "thanks", "thank you", "good morning",
-            "good evening", "bye", "goodbye", "what's up", "whats up",
-            "ok", "okay", "cool", "nice", "great", "awesome",
-            "that makes sense", "got it", "i see", "what can you do",
-        ]
-        if any(message == w or message.startswith(w + " ") for w in casual_words):
-            return {**state, "intent": "chat"}
-
-        # 4. LLM classifier — is it technical at all?
-        try:
-            is_technical = self.llm.generate(
-                system_prompt=IS_TECHNICAL_PROMPT,
-                user_message=state["message"]
-            ).strip().upper()
-        except Exception:
-            is_technical = "YES"
-
-        if not is_technical.startswith("YES"):
-            return {**state, "intent": "chat"}
-
-        # 5. LLM classifier — should it go to Recommender?
-        try:
-            is_recommender = self.llm.generate(
-                system_prompt=IS_RECOMMENDER_PROMPT,
-                user_message=state["message"]
-            ).strip().upper()
-        except Exception:
-            is_recommender = "NO"
-
-        if is_recommender.startswith("YES"):
+        elif label == "COMPARE":
             return {**state, "intent": "brief_recommend"}
-
-        return {**state, "intent": "brief"}
+        else:  # TEACH
+            return {**state, "intent": "brief"}
 
     def _route(self, state: TutorState) -> str:
         return state["intent"]
@@ -392,11 +302,10 @@ class Orchestrator:
                 system_prompt=BRIEF_ANSWER_PROMPT,
                 user_message=user_message
             )
-            concept = self._extract_concept(state["message"])
-            if concept:
-                self.pending_concept = concept
-                self.pending_message = state["message"] + " — include detailed code examples and step by step explanation"
-                self.pending_intent  = "solver"
+            # Use raw message as pending — no extra LLM call needed
+            self.pending_concept = state["message"][:80]
+            self.pending_message = state["message"] + " — give a complete explanation with detailed code examples and step by step breakdown"
+            self.pending_intent  = "solver"
         except Exception as e:
             response = f"Something went wrong: {e}"
         return {**state, "response": response, "agent_used": "Solver"}
@@ -412,11 +321,10 @@ class Orchestrator:
                 system_prompt=BRIEF_RECOMMENDER_PROMPT,
                 user_message=user_message
             )
-            concept = self._extract_concept(state["message"])
-            if concept:
-                self.pending_concept = concept
-                self.pending_message = state["message"] + " — include detailed code examples"
-                self.pending_intent  = "recommender"
+            # Use raw message as pending — no extra LLM call needed
+            self.pending_concept = state["message"][:80]
+            self.pending_message = state["message"] + " — give a complete detailed comparison with code examples"
+            self.pending_intent  = "recommender"
         except Exception as e:
             response = f"Something went wrong: {e}"
         return {**state, "response": response, "agent_used": "Recommender"}
