@@ -153,7 +153,8 @@ Return ONLY this JSON:
         concept: str,
         question: str,
         student_answer: str,
-        expected_points: list
+        expected_points: list,
+        kg: str = "fods"
     ) -> dict:
         """
         Objectively evaluate a student's answer.
