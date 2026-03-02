@@ -215,6 +215,7 @@ for key, val in {
     "switch_to_chat": False,
     "active_tab": "chat",
     "selected_kg_node": None,
+    "_clear_node_requested": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -498,6 +499,11 @@ with st.sidebar:
 # ─────────────────────────────────────────────────────
 # MAIN LAYOUT
 # ─────────────────────────────────────────────────────
+# ── Clear node filter — handled at top level so it works inside nested tabs ──
+if st.session_state.get("_clear_node_requested"):
+    st.session_state["selected_kg_node"]      = None
+    st.session_state["_clear_node_requested"] = False
+
 col_left, col_right = st.columns([1, 1.8], gap="large")
 
 # ══════════════════════════════════════════════════════
@@ -638,20 +644,18 @@ with col_left:
 
         _sel = st.session_state.get("selected_kg_node")
         if _sel:
-            # Show node name + a small inline cancel button
-            hcol1, hcol2 = st.columns([5, 1])
-            with hcol1:
-                st.markdown(
-                    f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
-                    f'text-transform:uppercase;margin-bottom:0.3rem;line-height:2">'
-                    f'Suggested · <span style="color:#0284C7;text-transform:none;'
-                    f'letter-spacing:0;font-weight:600">{_sel}</span></div>',
-                    unsafe_allow_html=True)
-            with hcol2:
-                if st.button("✕", key="clear_node", help="Clear node filter",
-                             use_container_width=True):
-                    st.session_state["selected_kg_node"] = None
-                    st.rerun()
+            st.markdown(
+                f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
+                f'text-transform:uppercase;margin-bottom:0.3rem;line-height:2">'
+                f'Suggested · <span style="color:#0284C7;text-transform:none;'
+                f'letter-spacing:0;font-weight:600">{_sel}</span>'
+                f'&nbsp;<span id="clear-hint" style="color:#94A3B8;font-size:0.55rem;'
+                f'font-weight:400;text-transform:none;letter-spacing:0">'
+                f'(click node again to change)</span></div>',
+                unsafe_allow_html=True)
+            if st.button("✕ clear filter", key="clear_node", use_container_width=True):
+                st.session_state["_clear_node_requested"] = True
+                st.rerun()
         else:
             st.markdown(
                 '<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
