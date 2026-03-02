@@ -437,9 +437,12 @@ def render_kg(kg_data: dict, height: int = 380):
             if n["data"].get("id") and n["data"].get("label")
         }
         clicked_label = id_to_label.get(clicked, clicked)
-        if clicked_label != st.session_state.get("selected_kg_node"):
+        if clicked_label == st.session_state.get("selected_kg_node"):
+            # Clicking the same node again clears the filter
+            st.session_state["selected_kg_node"] = None
+        else:
             st.session_state["selected_kg_node"] = clicked_label
-            st.rerun()
+        st.rerun()
 
 # ─────────────────────────────────────────────────────
 # HEADER
@@ -639,18 +642,15 @@ with col_left:
 
         _sel = st.session_state.get("selected_kg_node")
         if _sel:
-            lc1, lc2 = st.columns([3, 1])
-            with lc1:
-                st.markdown(
-                    f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
-                    f'text-transform:uppercase;margin-bottom:0.3rem">'
-                    f'Suggested · <span style="color:#0284C7;text-transform:none;letter-spacing:0">'
-                    f'{_sel}</span></div>',
-                    unsafe_allow_html=True)
-            with lc2:
-                if st.button("✕ clear", key="clear_node", use_container_width=True):
-                    st.session_state["selected_kg_node"] = None
-                    st.rerun()
+            st.markdown(
+                f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
+                f'text-transform:uppercase;margin-bottom:0.3rem">'
+                f'Suggested · <span style="color:#0284C7;text-transform:none;letter-spacing:0">'
+                f'{_sel}</span></div>',
+                unsafe_allow_html=True)
+            if st.button("✕ clear node filter", key="clear_node", use_container_width=True):
+                st.session_state["selected_kg_node"] = None
+                st.rerun()
         else:
             st.markdown(
                 '<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
