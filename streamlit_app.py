@@ -214,6 +214,7 @@ for key, val in {
     "ingestion_done": False,
     "switch_to_chat": False,
     "active_tab": "chat",
+    "selected_kg_node": None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -473,6 +474,33 @@ with st.sidebar:
 
         render_kg(st.session_state.kg_data, height=420)
         st.caption("💡 Right-click → Save image as... to export PNG")
+
+        # Node selector — click a node to narrow suggested topics
+        node_labels = sorted([
+            n["data"]["label"]
+            for n in st.session_state.kg_data.get("elements", {}).get("nodes", [])
+            if n["data"].get("label")
+        ])
+        if node_labels:
+            st.markdown(
+                '<div style="font-size:0.58rem;color:#94A3B8;letter-spacing:0.12em;'
+                'text-transform:uppercase;margin-top:0.6rem;margin-bottom:0.2rem">'
+                'Focus topics on node</div>',
+                unsafe_allow_html=True)
+            selected = st.selectbox(
+                "Focus node",
+                ["— All topics —"] + node_labels,
+                index=0 if not st.session_state.selected_kg_node
+                      else (["— All topics —"] + node_labels).index(
+                          st.session_state.selected_kg_node)
+                      if st.session_state.selected_kg_node in node_labels else 0,
+                label_visibility="collapsed",
+                key="kg_node_selector"
+            )
+            new_node = None if selected == "— All topics —" else selected
+            if new_node != st.session_state.selected_kg_node:
+                st.session_state.selected_kg_node = new_node
+                st.rerun()
     else:
         st.markdown("""
         <div style="text-align:center;padding:2rem 1rem;color:#94A3B8">
@@ -533,9 +561,11 @@ with col_left:
         def get_quick_topics() -> list[str]:
             """
             Return suggested topics based on active KG and student progress.
+            If a KG node is selected in the sidebar, narrow suggestions to that node.
             FODS and TS have separate topic maps and defaults.
             """
-            kg_view = st.session_state.get("kg_view", "fods")
+            kg_view       = st.session_state.get("kg_view", "fods")
+            selected_node = st.session_state.get("selected_kg_node")
 
             # ── FODS defaults and topic map ──
             fods_defaults = [
@@ -604,13 +634,39 @@ with col_left:
                     if topic not in mastered and prompt not in suggestions:
                         suggestions.append(prompt)
 
+                # If a specific node is selected, prepend node-specific suggestions
+                if selected_node:
+                    node_lower = selected_node.lower()
+                    # Build node-focused prompts
+                    node_prompts = [
+                        f"Explain {selected_node} in detail",
+                        f"What are the key techniques used in {selected_node}?",
+                        f"What are common mistakes when working with {selected_node}?",
+                        f"Show me a Python code example for {selected_node}",
+                        f"What should I know before learning {selected_node}?",
+                        f"How does {selected_node} connect to the rest of the pipeline?",
+                    ]
+                    # If there's a matching topic map entry, put its prompt first
+                    for topic, prompt in topic_map.items():
+                        if node_lower in topic.lower() or topic.lower() in node_lower:
+                            node_prompts.insert(0, prompt)
+                            break
+                    return node_prompts[:6]
+
                 return suggestions[:6] if suggestions else defaults
             except Exception:
                 return ts_defaults if kg_view == "timeseries" else fods_defaults
 
         quick_prompts = get_quick_topics()
 
-        st.markdown('<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:0.5rem">Suggested topics</div>', unsafe_allow_html=True)
+        selected_node = st.session_state.get("selected_kg_node")
+        topic_label = (
+            f'Suggested topics · <span style="color:#0284C7">{selected_node}</span>'
+            if selected_node else "Suggested topics"
+        )
+        st.markdown(
+            f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:0.5rem">{topic_label}</div>',
+            unsafe_allow_html=True)
         qc1, qc2 = st.columns(2)
         for i, prompt in enumerate(quick_prompts):
             col = qc1 if i % 2 == 0 else qc2
