@@ -114,6 +114,12 @@ section[data-testid="collapsedControl"] { visibility: visible !important; displa
     color: #1E293B !important;
     font-family: 'JetBrains Mono', monospace !important;
     font-size: 0.82rem !important;
+    resize: none !important;
+    line-height: 1.6 !important;
+}
+.stTextArea textarea:focus {
+    border-color: #059669 !important;
+    box-shadow: 0 0 0 2px rgba(5,150,105,0.1) !important;
 }
 .stButton button {
     background: linear-gradient(135deg, #F0FDF4, #DCFCE7) !important;
@@ -206,6 +212,7 @@ for key, val in {
     "kg_view": "fods", "kg_subview": "pipeline",
     "response_style": "Balanced", "difficulty_override": "Auto",
     "ingestion_done": False,
+    "switch_to_chat": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -484,29 +491,36 @@ col_left, col_right = st.columns([1, 1.8], gap="large")
 # LEFT — Input & Controls
 # ══════════════════════════════════════════════════════
 with col_left:
+    # If user clicked "Go to Chat" from assessment, auto-select chat tab
+    _default_tab = 0 if st.session_state.get("switch_to_chat") else None
+    if st.session_state.get("switch_to_chat"):
+        st.session_state["switch_to_chat"] = False
+
     tab_chat, tab_assess, tab_settings, tab_eval = st.tabs(["💬 Chat", "📝 Assessment", "⚙️ Settings", "🧪 Evaluation"])
 
     # ── CHAT ──
     with tab_chat:
         st.markdown('<div class="panel-header">Ask a question</div>', unsafe_allow_html=True)
 
-        ic, bc = st.columns([4, 1])
-        with ic:
-            user_input = st.text_input(
-                "msg", placeholder="Ask a question...",
-                label_visibility="collapsed", key="chat_input",
-                autocomplete="off")
-        with bc:
-            send = st.button("Send →", use_container_width=True, key="send_btn")
+        # Chat textarea — Enter = new line, Ctrl+Enter = submit via button click
+        user_input = st.text_area(
+            "msg",
+            placeholder="Ask a question...  (Ctrl+Enter to send)",
+            label_visibility="collapsed",
+            key="chat_input",
+            height=90,       # ~3 lines
+            max_chars=2000,
+        )
+        send = st.button("Send →", use_container_width=True, key="send_btn")
 
-        if send and user_input:
+        if send and user_input and user_input.strip():
+            user_input = user_input.strip()
             st.session_state.messages.append({"role": "user", "content": user_input})
             with st.spinner("Thinking..."):
                 r = call_chat(user_input)
             st.session_state.messages.append({
                 "role": "assistant", "content": r["response"],
                 "agent": r.get("agent", "Solver")})
-            # Force KG sidebar to re-fetch so status color changes appear immediately
             st.session_state.last_kg_refresh = 0
             st.session_state.kg_data         = None
             st.rerun()
@@ -1147,10 +1161,18 @@ with col_right:
             elif next_action == "practice_more":
                 st.info("Keep practising before moving on.")
 
-            if st.button("Next Question →", key="next_q"):
-                st.session_state.current_question  = None
-                st.session_state.assessment_result = None
-                st.rerun()
+            bc1, bc2 = st.columns(2)
+            with bc1:
+                if st.button("Next Question →", key="next_q", use_container_width=True):
+                    st.session_state.current_question  = None
+                    st.session_state.assessment_result = None
+                    st.rerun()
+            with bc2:
+                if st.button("💬 Go to Chat →", key="go_chat", use_container_width=True):
+                    st.session_state.current_question  = None
+                    st.session_state.assessment_result = None
+                    st.session_state["switch_to_chat"] = True
+                    st.rerun()
 
     # ── Conversation view — shown when no active question ──
     else:
