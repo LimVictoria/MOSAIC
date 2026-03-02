@@ -213,6 +213,7 @@ for key, val in {
     "response_style": "Balanced", "difficulty_override": "Auto",
     "ingestion_done": False,
     "switch_to_chat": False,
+    "active_tab": "chat",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -500,6 +501,7 @@ with col_left:
 
     # ── CHAT ──
     with tab_chat:
+        st.session_state["active_tab"] = "chat"
         st.markdown('<div class="panel-header">Ask a question</div>', unsafe_allow_html=True)
 
         # Chat textarea — Enter = new line, Ctrl+Enter = submit via button click
@@ -626,6 +628,7 @@ with col_left:
 
     # ── ASSESSMENT ──
     with tab_assess:
+        st.session_state["active_tab"] = "assessment"
         st.markdown('<div class="panel-header">Test your understanding</div>', unsafe_allow_html=True)
 
         concept_input = st.text_input(
@@ -1087,8 +1090,8 @@ with col_left:
 # ══════════════════════════════════════════════════════
 with col_right:
 
-    # ── Assessment view — shown when a question is active ──
-    if st.session_state.get("current_question"):
+    # ── Assessment view — only shown when user is on assessment tab with an active question ──
+    if st.session_state.get("current_question") and st.session_state.get("active_tab") == "assessment":
         q             = st.session_state.current_question
         concept_input = st.session_state.get("current_concept", "")
 
