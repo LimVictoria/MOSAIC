@@ -87,13 +87,12 @@ class Neo4jClient:
     def update_node_status(self, name: str, status: str, kg: str = None):
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
-        # Match any node by name — works for both FODS and TS KGs
-        # Optionally filter by kg to avoid cross-KG collisions on shared names
-        if kg:
+        if kg == 'timeseries':
+            # TS nodes have kg='timeseries' explicitly set
             cypher = """
             MATCH (n)
             WHERE n.name = $name
-              AND coalesce(n.kg, 'fods') = $kg
+              AND n.kg = 'timeseries'
             SET n.status = $status,
                 n.updated_at = $now
             WITH n
@@ -101,8 +100,23 @@ class Neo4jClient:
             SET n.mastered_at = $now
             RETURN n
             """
-            self.query(cypher, {"name": name, "status": status, "now": now, "kg": kg})
+            self.query(cypher, {"name": name, "status": status, "now": now})
+        elif kg == 'fods':
+            # FODS nodes: Topic or Technique where kg = 'fods' or kg property absent
+            cypher = """
+            MATCH (n)
+            WHERE n.name = $name
+              AND coalesce(n.kg, 'fods') = 'fods'
+            SET n.status = $status,
+                n.updated_at = $now
+            WITH n
+            WHERE $status = 'green' AND n.mastered_at IS NULL
+            SET n.mastered_at = $now
+            RETURN n
+            """
+            self.query(cypher, {"name": name, "status": status, "now": now})
         else:
+            # No kg filter — update any node with this name
             cypher = """
             MATCH (n)
             WHERE n.name = $name
@@ -136,14 +150,24 @@ class Neo4jClient:
         results = self.query(cypher, {"name": topic_name})
         return [r["name"] for r in results]
 
-    def get_prerequisite_chain_for_feedback(self, topic_name: str) -> list[dict]:
-        cypher = """
-        MATCH path = (t:Topic {name: $name})-[:PREREQUISITE*]->(pre:Topic)
-        RETURN pre.name as name,
-               coalesce(pre.status, 'grey') as status,
-               length(path) as depth
-        ORDER BY depth
-        """
+    def get_prerequisite_chain_for_feedback(self, topic_name: str, kg: str = 'fods') -> list[dict]:
+        if kg == 'timeseries':
+            # PipelineStage prereqs: stages that LEAD TO this one (i.e. come before it)
+            cypher = """
+            MATCH path = (pre:PipelineStage)-[:LEADS_TO*]->(t:PipelineStage {name: $name})
+            RETURN pre.name as name,
+                   coalesce(pre.status, 'grey') as status,
+                   length(path) as depth
+            ORDER BY depth
+            """
+        else:
+            cypher = """
+            MATCH path = (t:Topic {name: $name})-[:PREREQUISITE*]->(pre:Topic)
+            RETURN pre.name as name,
+                   coalesce(pre.status, 'grey') as status,
+                   length(path) as depth
+            ORDER BY depth
+            """
         return self.query(cypher, {"name": topic_name})
 
     # ── Curriculum structure reads ─────────────────
@@ -598,11 +622,20 @@ class Neo4jClient:
                 continue
             seen_ids.add(node_id)
             status = node.get("status", "grey")
+            # Status colors reflect student progress; fall back to type color when grey
+            status_color_map = {
+                "blue":   "#3B82F6",
+                "yellow": "#F59E0B",
+                "green":  "#10B981",
+                "red":    "#EF4444",
+                "orange": "#F97316",
+            }
+            color = status_color_map.get(status, type_colors.get(label_type, "#94A3B8"))
             cytoscape_nodes.append({
                 "data": {
                     "id":        node_id,
                     "label":     name,
-                    "color":     type_colors.get(label_type, "#94A3B8"),
+                    "color":     color,
                     "node_type": label_type,
                     "status":    status,
                     "tooltip":   f"[{label_type}] {name}" + (f"\n{desc[:80]}" if desc else ""),
