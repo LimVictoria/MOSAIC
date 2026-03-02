@@ -475,31 +475,33 @@ with st.sidebar:
         render_kg(st.session_state.kg_data, height=420)
         st.caption("💡 Right-click → Save image as... to export PNG")
 
-        # Node selector — click a node to narrow suggested topics
-        node_labels = sorted([
+        # ── Node focus selector ──
+        # streamlit-agraph can't fire Python callbacks on click, so we use a
+        # selectbox directly below the graph. Picking a node here updates the
+        # suggested topics in the Chat tab instantly.
+        _node_labels = sorted(set(
             n["data"]["label"]
             for n in st.session_state.kg_data.get("elements", {}).get("nodes", [])
             if n["data"].get("label")
-        ])
-        if node_labels:
+        ))
+        if _node_labels:
             st.markdown(
-                '<div style="font-size:0.58rem;color:#94A3B8;letter-spacing:0.12em;'
-                'text-transform:uppercase;margin-top:0.6rem;margin-bottom:0.2rem">'
-                'Focus topics on node</div>',
+                '<div style="font-size:0.58rem;color:#94A3B8;letter-spacing:0.1em;'
+                'text-transform:uppercase;margin-top:0.5rem;margin-bottom:0.2rem">'
+                '🎯 Focus suggested topics on node</div>',
                 unsafe_allow_html=True)
-            selected = st.selectbox(
-                "Focus node",
-                ["— All topics —"] + node_labels,
-                index=0 if not st.session_state.selected_kg_node
-                      else (["— All topics —"] + node_labels).index(
-                          st.session_state.selected_kg_node)
-                      if st.session_state.selected_kg_node in node_labels else 0,
+            _options   = ["— Show all topics —"] + _node_labels
+            _current   = st.session_state.get("selected_kg_node")
+            _cur_index = _options.index(_current) if _current in _options else 0
+            _selected  = st.selectbox(
+                "Focus node", _options,
+                index=_cur_index,
                 label_visibility="collapsed",
                 key="kg_node_selector"
             )
-            new_node = None if selected == "— All topics —" else selected
-            if new_node != st.session_state.selected_kg_node:
-                st.session_state.selected_kg_node = new_node
+            _new_node = None if _selected == "— Show all topics —" else _selected
+            if _new_node != st.session_state.selected_kg_node:
+                st.session_state.selected_kg_node = _new_node
                 st.rerun()
     else:
         st.markdown("""
@@ -520,11 +522,6 @@ col_left, col_right = st.columns([1, 1.8], gap="large")
 # LEFT — Input & Controls
 # ══════════════════════════════════════════════════════
 with col_left:
-    # If user clicked "Go to Chat" from assessment, auto-select chat tab
-    _default_tab = 0 if st.session_state.get("switch_to_chat") else None
-    if st.session_state.get("switch_to_chat"):
-        st.session_state["switch_to_chat"] = False
-
     tab_chat, tab_assess, tab_settings, tab_eval = st.tabs(["💬 Chat", "📝 Assessment", "⚙️ Settings", "🧪 Evaluation"])
 
     # ── CHAT ──
@@ -532,13 +529,12 @@ with col_left:
         st.session_state["active_tab"] = "chat"
         st.markdown('<div class="panel-header">Ask a question</div>', unsafe_allow_html=True)
 
-        # Chat textarea — Enter = new line, Ctrl+Enter = submit via button click
         user_input = st.text_area(
             "msg",
             placeholder="Ask a question...  (Ctrl+Enter to send)",
             label_visibility="collapsed",
             key="chat_input",
-            height=90,       # ~3 lines
+            height=90,
             max_chars=2000,
         )
         send = st.button("Send →", use_container_width=True, key="send_btn")
@@ -551,6 +547,7 @@ with col_left:
             st.session_state.messages.append({
                 "role": "assistant", "content": r["response"],
                 "agent": r.get("agent", "Solver")})
+            # Force KG sidebar to re-fetch so status color changes appear immediately
             st.session_state.last_kg_refresh = 0
             st.session_state.kg_data         = None
             st.rerun()
@@ -562,7 +559,6 @@ with col_left:
             """
             Return suggested topics based on active KG and student progress.
             If a KG node is selected in the sidebar, narrow suggestions to that node.
-            FODS and TS have separate topic maps and defaults.
             """
             kg_view       = st.session_state.get("kg_view", "fods")
             selected_node = st.session_state.get("selected_kg_node")
@@ -634,10 +630,9 @@ with col_left:
                     if topic not in mastered and prompt not in suggestions:
                         suggestions.append(prompt)
 
-                # If a specific node is selected, prepend node-specific suggestions
+                # ── If a node is selected in the sidebar, narrow to that node ──
                 if selected_node:
-                    node_lower = selected_node.lower()
-                    # Build node-focused prompts
+                    node_lower   = selected_node.lower()
                     node_prompts = [
                         f"Explain {selected_node} in detail",
                         f"What are the key techniques used in {selected_node}?",
@@ -646,7 +641,7 @@ with col_left:
                         f"What should I know before learning {selected_node}?",
                         f"How does {selected_node} connect to the rest of the pipeline?",
                     ]
-                    # If there's a matching topic map entry, put its prompt first
+                    # If there's a matching topic-map entry, put its question first
                     for topic, prompt in topic_map.items():
                         if node_lower in topic.lower() or topic.lower() in node_lower:
                             node_prompts.insert(0, prompt)
@@ -659,13 +654,15 @@ with col_left:
 
         quick_prompts = get_quick_topics()
 
-        selected_node = st.session_state.get("selected_kg_node")
-        topic_label = (
-            f'Suggested topics · <span style="color:#0284C7">{selected_node}</span>'
-            if selected_node else "Suggested topics"
+        _sel = st.session_state.get("selected_kg_node")
+        _topic_label = (
+            f'Suggested topics &nbsp;·&nbsp; <span style="color:#0284C7;text-transform:none;'
+            f'letter-spacing:0">{_sel}</span>'
+            if _sel else "Suggested topics"
         )
         st.markdown(
-            f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:0.5rem">{topic_label}</div>',
+            f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
+            f'text-transform:uppercase;margin-bottom:0.5rem">{_topic_label}</div>',
             unsafe_allow_html=True)
         qc1, qc2 = st.columns(2)
         for i, prompt in enumerate(quick_prompts):
@@ -1146,7 +1143,7 @@ with col_left:
 # ══════════════════════════════════════════════════════
 with col_right:
 
-    # ── Assessment view — only shown when user is on assessment tab with an active question ──
+    # ── Assessment view — only shown when user is on assessment tab ──
     if st.session_state.get("current_question") and st.session_state.get("active_tab") == "assessment":
         q             = st.session_state.current_question
         concept_input = st.session_state.get("current_concept", "")
@@ -1230,7 +1227,7 @@ with col_right:
                 if st.button("💬 Go to Chat →", key="go_chat", use_container_width=True):
                     st.session_state.current_question  = None
                     st.session_state.assessment_result = None
-                    st.session_state["switch_to_chat"] = True
+                    st.session_state["active_tab"]     = "chat"
                     st.rerun()
 
     # ── Conversation view — shown when no active question ──
