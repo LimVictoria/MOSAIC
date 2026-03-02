@@ -428,21 +428,17 @@ def render_kg(kg_data: dict, height: int = 380):
         highlightColor="#059669",
         d3=d3_config
     ))
-    # agraph returns the clicked node's id (string) or None
+    # agraph returns the clicked node id (string) or None
     if clicked:
-        # Map node id back to label — ids are lowercased/underscored versions of labels
         id_to_label = {
             n["data"]["id"]: n["data"]["label"]
             for n in kg_data.get("elements", {}).get("nodes", [])
-            if n["data"].get("id") and n["data"].get("label")
         }
         clicked_label = id_to_label.get(clicked, clicked)
-        if clicked_label == st.session_state.get("selected_kg_node"):
-            # Clicking the same node again clears the filter
-            st.session_state["selected_kg_node"] = None
-        else:
+        # Always update — deselection only via ✕ cancel button
+        if clicked_label != st.session_state.get("selected_kg_node"):
             st.session_state["selected_kg_node"] = clicked_label
-        st.rerun()
+            st.rerun()
 
 # ─────────────────────────────────────────────────────
 # HEADER
@@ -544,7 +540,7 @@ with col_left:
         def get_quick_topics() -> list[str]:
             """
             Return suggested topics based on active KG and student progress.
-            If a KG node is selected (via click), narrow suggestions to that node.
+            If a KG node is selected via click, narrow suggestions to that node.
             """
             kg_view       = st.session_state.get("kg_view", "fods")
             selected_node = st.session_state.get("selected_kg_node")
@@ -616,7 +612,7 @@ with col_left:
                     if topic not in mastered and prompt not in suggestions:
                         suggestions.append(prompt)
 
-                # ── Node selected via click: return node-specific prompts ──
+                # Node selected via click — return node-specific prompts
                 if selected_node:
                     node_lower   = selected_node.lower()
                     node_prompts = [
@@ -627,7 +623,7 @@ with col_left:
                         f"What should I know before learning {selected_node}?",
                         f"How does {selected_node} connect to the rest of the pipeline?",
                     ]
-                    # If there's a matching entry in the topic map, put it first
+                    # If there's a matching topic-map entry, put its question first
                     for topic, prompt in topic_map.items():
                         if node_lower in topic.lower() or topic.lower() in node_lower:
                             node_prompts.insert(0, prompt)
@@ -642,15 +638,20 @@ with col_left:
 
         _sel = st.session_state.get("selected_kg_node")
         if _sel:
-            st.markdown(
-                f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
-                f'text-transform:uppercase;margin-bottom:0.3rem">'
-                f'Suggested · <span style="color:#0284C7;text-transform:none;letter-spacing:0">'
-                f'{_sel}</span></div>',
-                unsafe_allow_html=True)
-            if st.button("✕ clear node filter", key="clear_node", use_container_width=True):
-                st.session_state["selected_kg_node"] = None
-                st.rerun()
+            # Show node name + a small inline cancel button
+            hcol1, hcol2 = st.columns([5, 1])
+            with hcol1:
+                st.markdown(
+                    f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
+                    f'text-transform:uppercase;margin-bottom:0.3rem;line-height:2">'
+                    f'Suggested · <span style="color:#0284C7;text-transform:none;'
+                    f'letter-spacing:0;font-weight:600">{_sel}</span></div>',
+                    unsafe_allow_html=True)
+            with hcol2:
+                if st.button("✕", key="clear_node", help="Clear node filter",
+                             use_container_width=True):
+                    st.session_state["selected_kg_node"] = None
+                    st.rerun()
         else:
             st.markdown(
                 '<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
