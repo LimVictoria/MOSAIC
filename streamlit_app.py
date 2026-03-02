@@ -267,12 +267,18 @@ def call_evaluate(concept, question, answer, expected) -> dict:
     if not COMPONENTS_LOADED:
         return {}
     try:
+        kg = st.session_state.get("kg_view", "fods")
         result = components["assessment"].evaluate_answer(
             student_id=st.session_state.student_id, concept=concept,
-            question=question, student_answer=answer, expected_points=expected)
+            question=question, student_answer=answer, expected_points=expected,
+            kg=kg)
         fb = components["feedback"].give_feedback(
             student_id=st.session_state.student_id, concept=concept,
-            question=question, student_answer=answer, assessment_result=result)
+            question=question, student_answer=answer, assessment_result=result,
+            kg=kg)
+        # Force KG sidebar refresh so color changes appear immediately
+        st.session_state.last_kg_refresh = 0
+        st.session_state.kg_data         = None
         return {
             "score": result["score"], "passed": result["passed"],
             "feedback": fb["feedback_text"],
