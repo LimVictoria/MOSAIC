@@ -96,7 +96,7 @@ class FeedbackAgent:
         attempt_count   = len(mistake_history) + 1
 
         # 2. Get prerequisite chain from curriculum KG
-        prereq_chain = self.neo4j.get_prerequisite_chain_for_feedback(topic_to_use)
+        prereq_chain = self.neo4j.get_prerequisite_chain_for_feedback(topic_to_use, kg=kg)
         weak_prereqs = [
             p for p in prereq_chain
             if p.get("status") in ["red", "orange", "grey", None]
@@ -194,7 +194,7 @@ Write feedback that:
                 })
 
             # Check what topic to recommend next
-            next_topic = self.neo4j.get_next_recommended_topic()
+            next_topic = self.neo4j.get_next_recommended_topic(kg=kg)
             if next_topic:
                 self.letta.update_core_memory(student_id, {
                     "current_topic": next_topic
