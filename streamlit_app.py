@@ -422,12 +422,24 @@ def render_kg(kg_data: dict, height: int = 380):
     # Tighter physics for TS (large graph) — stronger gravity pulls weak nodes in
     d3_config = {"gravity": -120, "linkLength": 80} if kg_view == "timeseries"            else {"gravity": -300, "linkLength": 130}
 
-    agraph(nodes=nodes, edges=edges, config=Config(
+    clicked = agraph(nodes=nodes, edges=edges, config=Config(
         width="100%", height=height, directed=True, physics=True,
         hierarchical=False, nodeHighlightBehavior=True,
         highlightColor="#059669",
         d3=d3_config
     ))
+    # agraph returns the clicked node's id (string) or None
+    if clicked:
+        # Map node id back to label — ids are lowercased/underscored versions of labels
+        id_to_label = {
+            n["data"]["id"]: n["data"]["label"]
+            for n in kg_data.get("elements", {}).get("nodes", [])
+            if n["data"].get("id") and n["data"].get("label")
+        }
+        clicked_label = id_to_label.get(clicked, clicked)
+        if clicked_label != st.session_state.get("selected_kg_node"):
+            st.session_state["selected_kg_node"] = clicked_label
+            st.rerun()
 
 # ─────────────────────────────────────────────────────
 # HEADER
@@ -474,35 +486,6 @@ with st.sidebar:
 
         render_kg(st.session_state.kg_data, height=420)
         st.caption("💡 Right-click → Save image as... to export PNG")
-
-        # ── Node focus selector ──
-        # streamlit-agraph can't fire Python callbacks on click, so we use a
-        # selectbox directly below the graph. Picking a node here updates the
-        # suggested topics in the Chat tab instantly.
-        _node_labels = sorted(set(
-            n["data"]["label"]
-            for n in st.session_state.kg_data.get("elements", {}).get("nodes", [])
-            if n["data"].get("label")
-        ))
-        if _node_labels:
-            st.markdown(
-                '<div style="font-size:0.58rem;color:#94A3B8;letter-spacing:0.1em;'
-                'text-transform:uppercase;margin-top:0.5rem;margin-bottom:0.2rem">'
-                '🎯 Focus suggested topics on node</div>',
-                unsafe_allow_html=True)
-            _options   = ["— Show all topics —"] + _node_labels
-            _current   = st.session_state.get("selected_kg_node")
-            _cur_index = _options.index(_current) if _current in _options else 0
-            _selected  = st.selectbox(
-                "Focus node", _options,
-                index=_cur_index,
-                label_visibility="collapsed",
-                key="kg_node_selector"
-            )
-            _new_node = None if _selected == "— Show all topics —" else _selected
-            if _new_node != st.session_state.selected_kg_node:
-                st.session_state.selected_kg_node = _new_node
-                st.rerun()
     else:
         st.markdown("""
         <div style="text-align:center;padding:2rem 1rem;color:#94A3B8">
@@ -558,7 +541,7 @@ with col_left:
         def get_quick_topics() -> list[str]:
             """
             Return suggested topics based on active KG and student progress.
-            If a KG node is selected in the sidebar, narrow suggestions to that node.
+            If a KG node is selected (via click), narrow suggestions to that node.
             """
             kg_view       = st.session_state.get("kg_view", "fods")
             selected_node = st.session_state.get("selected_kg_node")
@@ -630,7 +613,7 @@ with col_left:
                     if topic not in mastered and prompt not in suggestions:
                         suggestions.append(prompt)
 
-                # ── If a node is selected in the sidebar, narrow to that node ──
+                # ── Node selected via click: return node-specific prompts ──
                 if selected_node:
                     node_lower   = selected_node.lower()
                     node_prompts = [
@@ -641,7 +624,7 @@ with col_left:
                         f"What should I know before learning {selected_node}?",
                         f"How does {selected_node} connect to the rest of the pipeline?",
                     ]
-                    # If there's a matching topic-map entry, put its question first
+                    # If there's a matching entry in the topic map, put it first
                     for topic, prompt in topic_map.items():
                         if node_lower in topic.lower() or topic.lower() in node_lower:
                             node_prompts.insert(0, prompt)
@@ -655,15 +638,24 @@ with col_left:
         quick_prompts = get_quick_topics()
 
         _sel = st.session_state.get("selected_kg_node")
-        _topic_label = (
-            f'Suggested topics &nbsp;·&nbsp; <span style="color:#0284C7;text-transform:none;'
-            f'letter-spacing:0">{_sel}</span>'
-            if _sel else "Suggested topics"
-        )
-        st.markdown(
-            f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
-            f'text-transform:uppercase;margin-bottom:0.5rem">{_topic_label}</div>',
-            unsafe_allow_html=True)
+        if _sel:
+            lc1, lc2 = st.columns([3, 1])
+            with lc1:
+                st.markdown(
+                    f'<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
+                    f'text-transform:uppercase;margin-bottom:0.3rem">'
+                    f'Suggested · <span style="color:#0284C7;text-transform:none;letter-spacing:0">'
+                    f'{_sel}</span></div>',
+                    unsafe_allow_html=True)
+            with lc2:
+                if st.button("✕ clear", key="clear_node", use_container_width=True):
+                    st.session_state["selected_kg_node"] = None
+                    st.rerun()
+        else:
+            st.markdown(
+                '<div style="font-size:0.6rem;color:#94A3B8;letter-spacing:0.12em;'
+                'text-transform:uppercase;margin-bottom:0.5rem">Suggested topics</div>',
+                unsafe_allow_html=True)
         qc1, qc2 = st.columns(2)
         for i, prompt in enumerate(quick_prompts):
             col = qc1 if i % 2 == 0 else qc2
