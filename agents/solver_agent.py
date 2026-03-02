@@ -283,8 +283,9 @@ Return ONLY this JSON:
                 "question_type": question_data.get("question_type", "")
             })
 
-            # Update KG node to yellow (being assessed)
-            self.neo4j.update_node_status(concept, "yellow", kg=kg)
+            # Map concept to actual KG node, then set to yellow (being assessed)
+            mapped_topic = self.neo4j.map_concept_to_topic(concept, kg=kg) or concept
+            self.neo4j.update_node_status(mapped_topic, "yellow", kg=kg)
 
             return question_data
 
@@ -452,12 +453,16 @@ class FeedbackAgent:
         what_was_wrong = assessment_result.get("what_was_wrong", [])
         misconception = assessment_result.get("misconception", "")
 
+        # Map concept to actual KG node name before any KG operations
+        matched_topic = self.neo4j.map_concept_to_topic(concept, kg=kg)
+        topic_to_use  = matched_topic if matched_topic else concept
+
         # 1. Read full mistake history from Letta
         mistake_history = self.letta.get_mistake_history(student_id, concept)
         attempt_count = len(mistake_history) + 1
 
         # 2. Get prerequisite chain from KG to trace root cause
-        prereq_chain = self.neo4j.get_prerequisite_chain_for_feedback(concept)
+        prereq_chain = self.neo4j.get_prerequisite_chain_for_feedback(topic_to_use, kg=kg)
         weak_prereqs = [
             p for p in prereq_chain
             if p.get("status") in ["red", "orange", "grey"]
@@ -537,8 +542,8 @@ Return feedback that:
             "next_action": next_action
         })
 
-        # 9. Update KG node color based on result
-        self._update_kg_node(concept, passed, attempt_count, weak_prereqs, kg=kg)
+        # 9. Update KG node color based on result — use mapped topic not raw concept
+        self._update_kg_node(topic_to_use, passed, attempt_count, weak_prereqs, kg=kg)
 
         return {
             "feedback_text": feedback_text,
