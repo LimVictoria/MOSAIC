@@ -12,7 +12,8 @@ def get_secret(key: str, default: str = "") -> str:
 
 # ─── LLM ───
 LLM_PROVIDER    = get_secret("LLM_PROVIDER", "groq")
-LLM_MODEL       = get_secret("LLM_MODEL", "llama-3.3-70b-versatile")
+# LLM_MODEL       = get_secret("LLM_MODEL", "llama-3.3-70b-versatile")
+LLM_MODEL       = get_secret("LLM_MODEL", "openai/gpt-oss-120b")
 GROQ_API_KEY    = get_secret("GROQ_API_KEY", "")
 OLLAMA_BASE_URL = get_secret("OLLAMA_BASE_URL", "http://localhost:11434")
 
