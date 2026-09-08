@@ -139,12 +139,18 @@ Only needed if running locally for development. The live app is already deployed
 Add these secrets in your Streamlit Cloud dashboard:
 
 ```toml
-GROQ_API_KEY = "your_groq_key"
-LETTA_API_KEY = "your_letta_key"
-NEO4J_URI = "neo4j+s://xxxxxxxx.databases.neo4j.io"
-NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "your_password"
-PINECONE_API_KEY = "your_pinecone_key"
+LETTA_API_KEY = 'sk-let-...'
+LETTA_BASE_URL = 'https://....com'
+NEO4J_URI='neo4j+s://....databases.neo4j.io'
+NEO4J_USER='...'
+NEO4J_PASSWORD='...'
+GROQ_API_KEY = '...'
+GROQ_API_KEY_EVAL='...'
+LLM_PROVIDER = 'groq'
+LLM_MODEL = "openai/gpt-..."
+PINECONE_API_KEY='...'
+GEMINI_API_KEY='...'
+HF_TOKEN='...'
 ```
 
 On first deploy, the app will automatically download and ingest all files in `docs/` into Pinecone. Subsequent deploys skip already-ingested files instantly.
